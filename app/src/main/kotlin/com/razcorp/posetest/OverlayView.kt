@@ -19,6 +19,8 @@ class OverlayView(ctx: Context) : View(ctx) {
 
     override fun onDraw(c: Canvas) {
         c.drawColor(Color.BLACK)
+        c.save()
+        c.scale(-1f, 1f, width / 2f, height / 2f)   // mirror: you move right, the image moves right
         val b = frame
         var dst = RectF(0f, 0f, width.toFloat(), height.toFloat())
         if (b != null) {
@@ -39,6 +41,7 @@ class OverlayView(ctx: Context) : View(ctx) {
             }
             for (i in 0 until p.size / 2) c.drawCircle(x(i), y(i), 6f, dot)
         }
+        c.restore()
         var ty = 50f
         for (l in info.split('\n')) { c.drawText(l, 30f, ty, text); ty += 36f }
     }

@@ -2,14 +2,18 @@ package com.razcorp.posetest
 
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.SystemClock
 import kotlin.math.hypot
 
 val PLAYER_COLORS = intArrayOf(Color.rgb(255, 90, 90), Color.rgb(80, 160, 255), Color.rgb(90, 230, 120), Color.rgb(255, 210, 60))
 val PLAYER_NAMES = arrayOf("P1", "P2", "P3", "P4")
 
-/** One tracked person. Landmark indices: 0 nose, 11/12 shoulders, 13/14 elbows, 15/16 wrists, 19/20 fingers, 23/24 hips, 25/26 knees, 27/28 ankles. */
+/** One tracked person. Landmark indices: 0 nose, 2/5 eyes, 11/12 shoulders, 13/14 elbows, 15/16 wrists, 19/20 fingers, 23/24 hips, 25/26 knees, 27/28 ankles. */
 class Player(val slot: Int, val pts: FloatArray, val ts: Long) {
     val n: Int get() = pts.size / 2
     fun rawX(i: Int) = pts[i * 2]
@@ -24,6 +28,29 @@ fun segDist(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): F
     val l2 = dx * dx + dy * dy
     val t = if (l2 == 0f) 0f else (((px - ax) * dx + (py - ay) * dy) / l2).coerceIn(0f, 1f)
     return hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
+/** Game time: stops while paused, so timers, spawns and fades all freeze together. */
+object GameClock {
+    private var offset = 0L
+    private var pausedAt = 0L
+    fun now(): Long = (if (pausedAt != 0L) pausedAt else SystemClock.elapsedRealtime()) - offset
+    fun pause() { if (pausedAt == 0L) pausedAt = SystemClock.elapsedRealtime() }
+    fun resume() { if (pausedAt != 0L) { offset += SystemClock.elapsedRealtime() - pausedAt; pausedAt = 0L } }
+}
+
+fun pillRect(s: Int, w: Float, h: Float): RectF {
+    val x = w * (0.03f + 0.25f * s)
+    return RectF(x, h - h * 0.115f, x + w * 0.22f, h - h * 0.03f)
+}
+
+private val heartPath = Path()
+fun drawHeart(c: Canvas, x: Float, y: Float, s: Float, p: Paint) {
+    heartPath.reset()
+    heartPath.moveTo(x, y + s * 0.9f)
+    heartPath.cubicTo(x - s * 1.6f, y - s * 0.1f, x - s * 0.7f, y - s * 1.2f, x, y - s * 0.35f)
+    heartPath.cubicTo(x + s * 0.7f, y - s * 1.2f, x + s * 1.6f, y - s * 0.1f, x, y + s * 0.9f)
+    c.drawPath(heartPath, p)
 }
 
 /** Keeps each person in the same slot (P1..P4) from frame to frame and smooths jitter. */
@@ -87,7 +114,7 @@ object Sfx {
     fun over() = beep(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 400)
 }
 
-/** Base class: handles countdown, play phase, round timer. Games only implement update() and draw(). */
+/** Base class: handles countdown, play phase, round timer. Games implement update() and draw() and their look. */
 abstract class Game(val key: String, val title: String, val desc: String) {
     val scores = IntArray(4)
     val joined = BooleanArray(4)
@@ -97,6 +124,8 @@ abstract class Game(val key: String, val title: String, val desc: String) {
     open val roundMs = 60000L    // 0 = no time limit
     open val joinLate = true
     open val color: Int = Color.rgb(90, 90, 90)
+    open val bgTop: Int = Color.rgb(12, 18, 40)
+    open val bgBottom: Int = Color.rgb(40, 20, 70)
     abstract val hint: String
 
     fun reset(now: Long, players: List<Player>) {
@@ -119,11 +148,13 @@ abstract class Game(val key: String, val title: String, val desc: String) {
         }
     }
 
-    fun finish() { if (phase == 1) { phase = 2; phaseStart = android.os.SystemClock.elapsedRealtime(); Sfx.over() } }
+    fun finish() { if (phase == 1) { phase = 2; phaseStart = GameClock.now(); Sfx.over() } }
 
     open fun status(slot: Int): String = scores[slot].toString()
     open fun onReset(now: Long) {}
     open fun onStart(now: Long) {}
+    open fun drawIcon(c: Canvas, cx: Float, cy: Float, s: Float) {}
+    open fun drawOverlay(c: Canvas, w: Float, h: Float) {}
     abstract fun update(now: Long, dt: Long, players: List<Player>, w: Float, h: Float)
     abstract fun draw(c: Canvas, w: Float, h: Float, players: List<Player>)
 }

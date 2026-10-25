@@ -108,6 +108,7 @@ class MainActivity : Activity() {
         btn("TV IP") { askIp() }
         btn("Bluetooth") { pickBt() }
         btn("Flip") { flipCamera() }
+        btn("Pause") { link?.sendCmd(1) }
         btn("Rotate") { cycleRotation() }
         root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         barView = bar
@@ -159,7 +160,7 @@ class MainActivity : Activity() {
         started = true
         pose = PoseRunner(this, if (isTv) 2 else 4, ::onLocalPose) { camStatus = it }
         if (isTv) {
-            server = TvServer(this, ::onRemotePose) { netStatus = it }.also { it.start() }
+            server = TvServer(this, ::onRemotePose, ::onRemoteCmd) { netStatus = it }.also { it.start() }
         } else {
             link = PhoneLink { netStatus = it }.also { it.start() }
             netStatus = "Not connected - tap Wi-Fi, TV IP or Bluetooth"
@@ -188,6 +189,10 @@ class MainActivity : Activity() {
     private fun onLocalPose(pts: List<FloatArray>) {
         if (isTv) { if (!remoteActive()) game?.setFrame(pts) }
         else { overlay?.setPoses(pts); link?.send(pts) }
+    }
+
+    private fun onRemoteCmd(cmd: Int) {
+        if (cmd == 1) ui.post { game?.togglePause() }
     }
 
     private fun onRemotePose(pts: List<FloatArray>) {
@@ -230,7 +235,7 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (isTv && game?.inGame() == true) game?.backToMenu() else super.onBackPressed()
+        if (isTv && game?.onBack() == true) return else super.onBackPressed()
     }
 
     override fun onDestroy() {

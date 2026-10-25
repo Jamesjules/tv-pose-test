@@ -74,5 +74,11 @@ class PhoneLink(private val onStatus: (String) -> Unit) {
         catch (e: Exception) { drop(); onStatus("Link lost - reconnecting...") }
     }
 
+    fun sendCmd(cmd: Int) {
+        val o = out ?: return
+        try { synchronized(this) { o.write(byteArrayOf(0x43, cmd.toByte())); o.flush() } }
+        catch (e: Exception) { drop(); onStatus("Link lost - reconnecting...") }
+    }
+
     fun stop() { running = false; drop() }
 }

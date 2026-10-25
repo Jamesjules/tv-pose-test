@@ -18,6 +18,7 @@ import kotlin.concurrent.thread
 class TvServer(
     private val ctx: Context,
     private val onPose: (List<FloatArray>) -> Unit,
+    private val onCommand: (Int) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
     companion object {
@@ -103,6 +104,8 @@ class TvServer(
                         list.add(FloatArray(n * 2) { d.readShort() / 10000f })
                     }
                     onPose(list)
+                } else if (magic == 0x43) {     // command from phone (1 = pause/resume)
+                    onCommand(d.readUnsignedByte())
                 } else break
             }
         } catch (_: Exception) {}
