@@ -11,7 +11,7 @@ class OverlayView(ctx: Context) : View(ctx) {
 
     private val line = Paint().apply { strokeWidth = 6f; isAntiAlias = true }
     private val dot = Paint().apply { color = Color.WHITE; isAntiAlias = true }
-    private val text = Paint().apply { color = Color.WHITE; textSize = 34f; isAntiAlias = true; setShadowLayer(4f, 2f, 2f, Color.BLACK) }
+    private val text = Paint().apply { color = Color.WHITE; textSize = 28f; isAntiAlias = true; setShadowLayer(4f, 2f, 2f, Color.BLACK) }
     private val bones = intArrayOf(11,12, 11,13, 13,15, 12,14, 14,16, 11,23, 12,24, 23,24, 23,25, 25,27, 24,26, 26,28)
 
     fun setFrame(b: Bitmap) { frame = b; postInvalidate() }
@@ -40,6 +40,6 @@ class OverlayView(ctx: Context) : View(ctx) {
             for (i in 0 until p.size / 2) c.drawCircle(x(i), y(i), 6f, dot)
         }
         var ty = 50f
-        for (l in info.split('\n')) { c.drawText(l, 30f, ty, text); ty += 42f }
+        for (l in info.split('\n')) { c.drawText(l, 30f, ty, text); ty += 36f }
     }
 }

@@ -7,6 +7,7 @@ import android.app.UiModeManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -18,12 +19,14 @@ import android.os.SystemClock
 import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.Toast
 import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : Activity() {
@@ -32,6 +35,7 @@ class MainActivity : Activity() {
     }
     private var overlay: OverlayView? = null   // phone preview
     private var game: GameView? = null         // TV game
+    private var barView: LinearLayout? = null
     private var pose: PoseRunner? = null
     private var source: FrameSource? = null
     private var useUvc = false
@@ -43,43 +47,88 @@ class MainActivity : Activity() {
     @Volatile private var camStatus = ""
     @Volatile private var netStatus = ""
     @Volatile private var remoteTs = 0L
+    private var crashInfo = ""
     private val ui = Handler(Looper.getMainLooper())
     private var lastCam = 0
     private var lastPose = 0
     private var started = false
+    private var restartPending = false
+    private var lastTouch = 0L
+    private var rotMode = 0
     private val prefs by lazy { getSharedPreferences("posetest", 0) }
 
     private fun remoteActive() = SystemClock.elapsedRealtime() - remoteTs < 1500
+    private fun hasCam() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    private fun installCrashLogger() {
+        val old = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val where = e.stackTrace.firstOrNull { it.className.startsWith("com.razcorp") } ?: e.stackTrace.firstOrNull()
+                prefs.edit().putString("crash", "${e.javaClass.simpleName}: ${e.message} @ $where".take(300)).commit()
+            } catch (_: Throwable) {}
+            old?.uncaughtException(t, e)
+        }
+    }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        installCrashLogger()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        requestedOrientation = if (isTv) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        prefs.getString("crash", null)?.let { crashInfo = "Last crash: $it"; prefs.edit().remove("crash").apply() }
         if (isTv) { game = GameView(this); setContentView(game) } else buildPhoneUi()
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
-        else begin()
+        if (!hasCam()) requestPermissions(arrayOf(Manifest.permission.CAMERA), 1) else begin()
     }
 
-    override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, r: IntArray) { begin() }
+    override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, r: IntArray) {
+        if (r.isNotEmpty() && r[0] == PackageManager.PERMISSION_GRANTED) begin()
+        else camStatus = "Camera permission is needed - allow it in app settings"
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!started && hasCam()) begin()
+    }
 
     // ---------- phone UI ----------
+    private fun touched() { lastTouch = SystemClock.elapsedRealtime(); barView?.visibility = View.VISIBLE }
+
     private fun buildPhoneUi() {
         val root = FrameLayout(this)
         overlay = OverlayView(this); root.addView(overlay)
+        overlay!!.setOnClickListener { touched() }
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(0x99000000.toInt()) }
         fun btn(t: String, f: () -> Unit) {
-            val bt = Button(this); bt.text = t; bt.setOnClickListener { f() }
+            val bt = Button(this); bt.text = t; bt.textSize = 12f; bt.isAllCaps = false
+            bt.setOnClickListener { touched(); f() }
             bar.addView(bt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        btn("Wi-Fi auto") { connectWifiAuto() }
+        btn("Wi-Fi") { connectWifiAuto() }
         btn("TV IP") { askIp() }
         btn("Bluetooth") { pickBt() }
-        btn("Flip cam") {
-            facing = if (facing == CameraCharacteristics.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
-            startSource()
-        }
+        btn("Flip") { flipCamera() }
+        btn("Rotate") { cycleRotation() }
         root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        barView = bar
+        lastTouch = SystemClock.elapsedRealtime()
         setContentView(root)
+    }
+
+    private fun flipCamera() {
+        if (!started || restartPending) return
+        facing = if (facing == CameraCharacteristics.LENS_FACING_BACK) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
+        startSource()
+    }
+
+    private fun cycleRotation() {
+        rotMode = (rotMode + 1) % 3
+        requestedOrientation = when (rotMode) {
+            1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            2 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        }
+        Toast.makeText(this, arrayOf("Auto rotate", "Landscape (best for several players)", "Portrait (best for squats)")[rotMode], Toast.LENGTH_SHORT).show()
     }
 
     private fun connectWifiAuto() {
@@ -99,7 +148,7 @@ class MainActivity : Activity() {
 
     private fun pickBt() {
         val devs: List<BluetoothDevice> = try { BluetoothAdapter.getDefaultAdapter()?.bondedDevices?.toList() ?: emptyList() } catch (e: Exception) { emptyList() }
-        if (devs.isEmpty()) { netStatus = "No paired Bluetooth devices. Pair this phone with the TV in system Bluetooth settings first."; return }
+        if (devs.isEmpty()) { netStatus = "No paired Bluetooth devices. Pair this phone with the TV first."; return }
         val names = devs.map { try { it.name ?: it.address } catch (e: Exception) { it.address } }.toTypedArray()
         AlertDialog.Builder(this).setTitle("Pick your TV").setItems(names) { _, i -> link?.connectBt(devs[i]) }.show()
     }
@@ -113,19 +162,24 @@ class MainActivity : Activity() {
             server = TvServer(this, ::onRemotePose) { netStatus = it }.also { it.start() }
         } else {
             link = PhoneLink { netStatus = it }.also { it.start() }
-            netStatus = "Not connected - tap Wi-Fi auto, TV IP or Bluetooth"
+            netStatus = "Not connected - tap Wi-Fi, TV IP or Bluetooth"
             prefs.getString("ip", null)?.takeIf { it.count { c -> c == '.' } == 3 }?.let { link?.connectWifi(it) }
         }
         startSource()
         ui.post(object : Runnable {
             override fun run() {
+                val now = SystemClock.elapsedRealtime()
                 val c = camFrames.get(); val p = pose?.poseFrames?.get() ?: 0
                 val camFps = c - lastCam; val poseFps = p - lastPose; lastCam = c; lastPose = p
-                val input = if (isTv) (if (remoteActive()) "PHONE" else "TV camera (${if (useUvc) "UVC" else "Camera2"}) [DOWN = switch cam]") else "this phone's camera -> TV"
-                val txt = "${if (isTv) "TV" else "PHONE"} mode | input: $input\n" +
-                    "Cam $camFps fps | Pose $poseFps fps | ${pose?.latencyMs?.toInt() ?: 0} ms | ${pose?.delegateName}\n$netStatus\n$camStatus"
+                val input = if (isTv) (if (remoteActive()) "Input: phone" else "Input: TV camera (${if (useUvc) "UVC" else "Camera2"}) - DOWN switches")
+                            else "PHONE camera -> TV"
+                val txt = "$input\nCam $camFps fps | Pose $poseFps fps | ${pose?.latencyMs?.toInt() ?: 0} ms | ${pose?.delegateName}\n$netStatus\n$camStatus $crashInfo"
                 overlay?.info = txt; game?.info = txt
                 overlay?.postInvalidate()
+                if (!isTv) {
+                    val hide = netStatus.startsWith("Connected") && now - lastTouch > 6000
+                    barView?.visibility = if (hide) View.GONE else View.VISIBLE
+                }
                 ui.postDelayed(this, 1000)
             }
         })
@@ -141,29 +195,35 @@ class MainActivity : Activity() {
         game?.setFrame(pts)
     }
 
+    /** Stop the old camera, wait a moment so Android can release it, then open the new one. */
     private fun startSource() {
-        source?.stop()
-        val cb = { bmp: Bitmap, _: Long ->
-            camFrames.incrementAndGet()
-            if (isTv) { if (!remoteActive()) { game?.setThumb(bmp); pose?.submit(bmp) } }
-            else { overlay?.setFrame(bmp); pose?.submit(bmp) }
-            Unit
-        }
-        val st = { s: String -> camStatus = s }
-        source = when {
-            isTv && useUvc -> UvcSource(this, cb, st)
-            isTv -> Camera2Source(this, cb, st)
-            else -> Camera2Source(this, cb, st, facing, true)
-        }
-        source!!.start()
+        if (restartPending) return
+        restartPending = true
+        source?.stop(); source = null
+        camFrames.set(0); lastCam = 0
+        ui.postDelayed({
+            restartPending = false
+            if (isFinishing || isDestroyed || !hasCam()) return@postDelayed
+            val cb = { bmp: Bitmap, _: Long ->
+                camFrames.incrementAndGet()
+                if (isTv) { if (!remoteActive()) { game?.setThumb(bmp); pose?.submit(bmp) } }
+                else { overlay?.setFrame(bmp); pose?.submit(bmp) }
+                Unit
+            }
+            val st = { s: String -> camStatus = s }
+            source = when {
+                isTv && useUvc -> UvcSource(this, cb, st)
+                isTv -> Camera2Source(this, cb, st)
+                else -> Camera2Source(this, cb, st, facing, true)
+            }
+            source!!.start()
+        }, 450)
     }
 
     override fun onKeyDown(k: Int, e: KeyEvent): Boolean {
         if (isTv) {
             if (game?.onKey(k) == true) return true
-            if (k == KeyEvent.KEYCODE_DPAD_DOWN && game?.inMenu == true) {
-                useUvc = !useUvc; camFrames.set(0); lastCam = 0; startSource(); return true
-            }
+            if (k == KeyEvent.KEYCODE_DPAD_DOWN && game?.inMenu == true) { useUvc = !useUvc; startSource(); return true }
         }
         return super.onKeyDown(k, e)
     }

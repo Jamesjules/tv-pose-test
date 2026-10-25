@@ -39,7 +39,7 @@ class TvServer(
 
     private fun btName(): String = try { BluetoothAdapter.getDefaultAdapter()?.name ?: "no Bluetooth" } catch (e: Exception) { "?" }
 
-    private fun waiting() = "Waiting for phone | Wi-Fi: ${localIp()}:$PORT (auto-find) | Bluetooth: ${btName()} (pair first)"
+    private fun waiting() = "Waiting for phone... Wi-Fi ${localIp()}"
 
     fun start() {
         running = true

@@ -15,7 +15,7 @@ private val HAND_IDX = intArrayOf(15, 16, 19, 20)
 
 // ======================= 1. Bubble Pop =======================
 class BubbleGame : Game("bubble", "Bubble Pop", "Pop bubbles with your hands. Gold bubbles are worth 5!") {
-    override val hint = "Pop the bubbles! Gold = 5 points"
+    override val hint = "Pop the bubbles"
     override val color = Color.rgb(0, 170, 230)
     private class B(val x: Float, val y: Float, val born: Long, val gold: Boolean)
     private val bubbles = ArrayList<B>()
@@ -66,7 +66,7 @@ class BubbleGame : Game("bubble", "Bubble Pop", "Pop bubbles with your hands. Go
 
 // ======================= 2. Fruit Slice =======================
 class FruitGame : Game("fruit", "Fruit Slice", "Swipe fast through flying fruit. Bombs cost 5 points!") {
-    override val hint = "Slice the fruit - avoid the bombs!"
+    override val hint = "Slice fruit, avoid bombs"
     override val color = Color.rgb(255, 140, 0)
     private class F(var x: Float, var y: Float, val vx: Float, var vy: Float, val color: Int, val bomb: Boolean)
     private class S(val x: Float, val y: Float, val color: Int, val born: Long)
@@ -111,7 +111,7 @@ class FruitGame : Game("fruit", "Fruit Slice", "Swipe fast through flying fruit.
                 pv[k * 2] = hx; pv[k * 2 + 1] = hy
                 if (first || px < 0f || frameDt <= 0L) continue
                 val speed = hypot(hx - px, hy - py) / frameDt
-                if (speed < h * 0.0008f) continue
+                if (speed < h * 0.0005f) continue
                 var idx = fruits.size - 1
                 while (idx >= 0) {
                     val f = fruits[idx]
@@ -149,7 +149,7 @@ class FruitGame : Game("fruit", "Fruit Slice", "Swipe fast through flying fruit.
 
 // ======================= 3. Meteor Dodge =======================
 class DodgeGame : Game("dodge", "Meteor Dodge", "Dodge falling meteors. 3 lives. Last one standing wins!") {
-    override val hint = "Dodge the meteors!"
+    override val hint = "Dodge the meteors"
     override val color = Color.rgb(170, 70, 200)
     override val roundMs = 0L
     override val joinLate = false
@@ -172,7 +172,7 @@ class DodgeGame : Game("dodge", "Meteor Dodge", "Dodge falling meteors. 3 lives.
     }
 
     override fun status(slot: Int): String =
-        if (!joined[slot]) "" else if (alive[slot]) "${scores[slot]}s  lives ${lives[slot]}" else "OUT ${scores[slot]}s"
+        if (!joined[slot]) "" else if (alive[slot]) "${scores[slot]}s" else "OUT ${scores[slot]}s"
 
     override fun update(now: Long, dt: Long, players: List<Player>, w: Float, h: Float) {
         val el = now - startAt
@@ -211,6 +211,12 @@ class DodgeGame : Game("dodge", "Meteor Dodge", "Dodge falling meteors. 3 lives.
 
     override fun draw(c: Canvas, w: Float, h: Float, players: List<Player>) {
         val now = SystemClock.elapsedRealtime()
+        for (s in 0 until 4) if (joined[s] && phase >= 1) {
+            for (i in 0 until 3) {
+                paint.color = if (i < lives[s]) PLAYER_COLORS[s] else Color.argb(80, 255, 255, 255)
+                c.drawCircle(w * (0.03f + 0.25f * s) + 18f + i * 44f, h - h * 0.11f, 14f, paint)
+            }
+        }
         for (m in ms) {
             paint.color = Color.argb(110, 255, 120, 0); c.drawCircle(m.x, m.y, m.r * 1.5f, paint)
             paint.color = Color.rgb(150, 80, 40); c.drawCircle(m.x, m.y, m.r, paint)
@@ -229,46 +235,59 @@ class DodgeGame : Game("dodge", "Meteor Dodge", "Dodge falling meteors. 3 lives.
 class FitnessGame(private val jacks: Boolean) : Game(
     if (jacks) "jacks" else "squats",
     if (jacks) "Jumping Jacks" else "Squat Race",
-    if (jacks) "Most jumping jacks in 60 seconds. Show your full body!" else "Most squats in 60 seconds. Show your full body!"
+    if (jacks) "Most jumping jacks in 60 seconds" else "Most squats in 60 seconds. Show your knees!"
 ) {
-    override val hint = if (jacks) "Jumping jacks! Arms up, legs wide" else "Squats! Stand back so your knees are visible"
+    override val hint = if (jacks) "Do jumping jacks" else "Do squats - show your knees"
     override val color = if (jacks) Color.rgb(230, 80, 150) else Color.rgb(60, 190, 110)
     private val state = BooleanArray(4)
+    private val base = FloatArray(4)       // each player's own "standing" leg ratio (self-calibrating)
+    private val warn = BooleanArray(4)     // legs out of frame
     private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; setShadowLayer(6f, 3f, 3f, Color.BLACK) }
 
-    override fun onReset(now: Long) { state.fill(false) }
+    override fun onReset(now: Long) { state.fill(false); base.fill(0f); warn.fill(false) }
 
     override fun update(now: Long, dt: Long, players: List<Player>, w: Float, h: Float) {
         for (p in players) {
             if (p.n < 29) continue
             val s = p.slot
             if (jacks) {
+                val noseY = p.rawY(0)
+                val shY = (p.rawY(11) + p.rawY(12)) / 2f
                 val sw = abs(p.rawX(11) - p.rawX(12))
-                if (sw < 0.03f) continue
-                val armsUp = p.rawY(15) < p.rawY(0) && p.rawY(16) < p.rawY(0)
-                val armsDown = p.rawY(15) > p.rawY(11) && p.rawY(16) > p.rawY(11)
-                val legs = abs(p.rawX(27) - p.rawX(28))
-                if (!state[s] && armsUp && legs > 1.7f * sw) { state[s] = true; scores[s]++; Sfx.pop() }
-                else if (state[s] && armsDown && legs < 1.3f * sw) state[s] = false
+                if (sw < 0.02f) continue
+                val armsUp = p.rawY(15) < noseY && p.rawY(16) < noseY
+                val armsDown = p.rawY(15) > shY && p.rawY(16) > shY
+                val ankles = p.rawY(27) < 0.97f && p.rawY(28) < 0.97f
+                val legsApart = !ankles || abs(p.rawX(27) - p.rawX(28)) > 1.2f * sw
+                if (!state[s] && armsUp && legsApart) { state[s] = true; scores[s]++; Sfx.pop() }
+                else if (state[s] && armsDown) state[s] = false
             } else {
+                warn[s] = !(p.rawY(25) < 0.97f && p.rawY(26) < 0.97f)
+                if (warn[s]) continue
                 val sy = (p.rawY(11) + p.rawY(12)) / 2f
                 val hy = (p.rawY(23) + p.rawY(24)) / 2f
                 val ky = (p.rawY(25) + p.rawY(26)) / 2f
                 val torso = abs(hy - sy)
-                if (torso < 0.05f) continue
+                if (torso < 0.04f) continue
                 val ratio = (ky - hy) / torso
-                if (!state[s] && ratio < 0.62f) state[s] = true
-                else if (state[s] && ratio > 0.92f) { state[s] = false; scores[s]++; Sfx.pop() }
+                // adapt: rises fast to a new standing value, decays slowly
+                if (ratio > base[s]) base[s] += (ratio - base[s]) * min(1f, dt / 300f)
+                else base[s] += (ratio - base[s]) * min(1f, dt / 20000f)
+                if (base[s] < 0.4f) continue
+                if (!state[s] && ratio < base[s] * 0.72f) state[s] = true
+                else if (state[s] && ratio > base[s] * 0.88f) { state[s] = false; scores[s]++; Sfx.pop() }
             }
         }
     }
 
     override fun draw(c: Canvas, w: Float, h: Float, players: List<Player>) {
-        txt.textSize = h * 0.13f
         for (p in players) {
             if (!joined[p.slot]) continue
             txt.color = PLAYER_COLORS[p.slot]
-            c.drawText(scores[p.slot].toString(), p.x(0, w), max(h * 0.16f, p.y(0, h) - h * 0.1f), txt)
+            txt.textSize = h * 0.13f
+            val cx = p.x(0, w); val cy = max(h * 0.16f, p.y(0, h) - h * 0.1f)
+            c.drawText(scores[p.slot].toString(), cx, cy, txt)
+            if (!jacks && warn[p.slot]) { txt.textSize = h * 0.045f; c.drawText("Step back", cx, cy + h * 0.07f, txt) }
         }
     }
 }

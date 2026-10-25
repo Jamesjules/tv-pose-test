@@ -6,7 +6,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 
-/** TV screen: game menu (remote or hand-hover to select), countdown, play, results. Supports 1-4 players. */
+/** TV screen: menu (raise a hand over a game, or remote), countdown, play, results. 1-4 players. */
 class GameView(ctx: Context) : View(ctx) {
     private class Frame(val poses: List<FloatArray>, val ts: Long)
     @Volatile private var latest: Frame? = null
@@ -21,8 +21,9 @@ class GameView(ctx: Context) : View(ctx) {
     private var selected = 0
     private var current: Game? = null
     private var menuAt = 0L
-    private var dwellIdx = -1
-    private var dwellStart = 0L
+    private val cardStart = LongArray(8)
+    private var hoverIdx = -1
+    private var debug = false
     private var savedResult = false
     private var newBest = false
     private var lastCount = -1
@@ -45,14 +46,14 @@ class GameView(ctx: Context) : View(ctx) {
     val inMenu: Boolean get() = current == null
     fun inGame(): Boolean = current != null
 
-    fun backToMenu() { current = null; menuAt = SystemClock.elapsedRealtime(); dwellIdx = -1 }
+    fun backToMenu() { current = null; menuAt = SystemClock.elapsedRealtime(); cardStart.fill(0L) }
 
     private fun startGame(i: Int) {
         val now = SystemClock.elapsedRealtime()
         val g = games[i]
         selected = i; current = g
         g.reset(now, tracker.players(now))
-        savedResult = false; newBest = false; lastCount = -1; dwellIdx = -1
+        savedResult = false; newBest = false; lastCount = -1; cardStart.fill(0L)
     }
 
     fun onKey(k: Int): Boolean {
@@ -62,6 +63,7 @@ class GameView(ctx: Context) : View(ctx) {
             return when (k) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> { selected = (selected + games.size - 1) % games.size; true }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> { selected = (selected + 1) % games.size; true }
+                KeyEvent.KEYCODE_DPAD_UP -> { debug = !debug; true }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { startGame(selected); true }
                 else -> false
             }
@@ -80,23 +82,38 @@ class GameView(ctx: Context) : View(ctx) {
         return yy
     }
 
-    private fun handsOf(players: List<Player>, w: Float, h: Float): List<PointF> {
+    /** Only RAISED hands count as a cursor (wrist above mid-torso), so a resting hand never selects anything. */
+    private fun raisedHands(players: List<Player>, w: Float, h: Float): List<PointF> {
         val out = ArrayList<PointF>()
-        for (p in players) for (i in handIdx) if (i < p.n) out.add(PointF(p.x(i, w), p.y(i, h)))
+        for (p in players) {
+            if (p.n < 25) continue
+            for (s in arrayOf(intArrayOf(15, 19, 11, 23), intArrayOf(16, 20, 12, 24))) {
+                if (p.rawY(s[0]) < (p.rawY(s[2]) + p.rawY(s[3])) / 2f) {
+                    out.add(PointF(p.x(s[0], w), p.y(s[0], h)))
+                    out.add(PointF(p.x(s[1], w), p.y(s[1], h)))
+                }
+            }
+        }
         return out
     }
 
-    private fun dwellSelect(c: Canvas, now: Long, rects: List<RectF>, hands: List<PointF>): Int {
-        var hit = -1
-        for ((i, r) in rects.withIndex()) if (hands.any { r.contains(it.x, it.y) }) { hit = i; break }
-        if (hit != dwellIdx) { dwellIdx = hit; dwellStart = now }
-        if (hit >= 0) {
-            val pr = ((now - dwellStart) / 1000f).coerceIn(0f, 1f)
-            val r = rects[hit]
-            c.drawRect(r.left, r.bottom - 14f, r.left + r.width() * pr, r.bottom, prog)
-            if (pr >= 1f) { dwellIdx = -1; return hit }
+    /** Each target has its own 1-second timer; the first one to fill wins. Returns its index or -1. */
+    private fun dwellSelect(c: Canvas, now: Long, show: List<RectF>, hit: List<RectF>, hands: List<PointF>): Int {
+        var fired = -1; var best = -1; var bestPr = 0f
+        for (i in hit.indices) {
+            val inside = hands.any { hit[i].contains(it.x, it.y) }
+            if (inside) {
+                if (cardStart[i] == 0L) cardStart[i] = now
+                val pr = ((now - cardStart[i]) / 1000f).coerceIn(0f, 1f)
+                val r = show[i]
+                c.drawRect(r.left, r.bottom - 14f, r.left + r.width() * pr, r.bottom, prog)
+                if (pr > bestPr) { bestPr = pr; best = i }
+                if (pr >= 1f && fired < 0) fired = i
+            } else cardStart[i] = 0L
         }
-        return -1
+        hoverIdx = best
+        if (fired >= 0) cardStart.fill(0L)
+        return fired
     }
 
     private fun drawSkeleton(c: Canvas, p: Player, w: Float, h: Float) {
@@ -109,10 +126,6 @@ class GameView(ctx: Context) : View(ctx) {
         }
         dot.color = PLAYER_COLORS[p.slot]
         for (i in handIdx) if (i < p.n) c.drawCircle(p.x(i, w), p.y(i, h), 18f, dot)
-        if (p.n > 0) {
-            hud.color = PLAYER_COLORS[p.slot]; hud.textSize = h * 0.035f
-            c.drawText(PLAYER_NAMES[p.slot], p.x(0, w) - 20f, p.y(0, h) - 30f, hud)
-        }
     }
 
     override fun onDraw(c: Canvas) {
@@ -128,14 +141,15 @@ class GameView(ctx: Context) : View(ctx) {
     }
 
     private fun drawMenu(c: Canvas, w: Float, h: Float, now: Long, players: List<Player>) {
-        title.textSize = h * 0.09f; c.drawText("POSE PLAY", w * 0.04f, h * 0.14f, title)
-        sub.textSize = h * 0.03f
-        c.drawText("Stand 2-3 m from the camera. Hold a hand over a game for 1 second - or use the remote: LEFT / RIGHT + OK", w * 0.04f, h * 0.20f, sub)
+        title.textSize = h * 0.08f; c.drawText("POSE PLAY", w * 0.04f, h * 0.11f, title)
+        sub.textSize = h * 0.032f
+        c.drawText("Raise a hand over a game to start", w * 0.04f, h * 0.17f, sub)
 
         val n = games.size
         val margin = w * 0.04f; val gap = w * 0.015f
-        val cw = (w - 2 * margin - gap * (n - 1)) / n; val ch = h * 0.42f; val top = h * 0.27f
+        val cw = (w - 2 * margin - gap * (n - 1)) / n; val ch = h * 0.40f; val top = h * 0.22f
         val rects = games.indices.map { i -> RectF(margin + i * (cw + gap), top, margin + i * (cw + gap) + cw, top + ch) }
+        val hitRects = rects.map { RectF(it.left - gap / 2, h * 0.05f, it.right + gap / 2, h * 0.80f) }
         for ((i, g) in games.withIndex()) {
             val r = rects[i]
             fill.color = Color.rgb(28, 38, 50); c.drawRoundRect(r, 24f, 24f, fill)
@@ -150,18 +164,20 @@ class GameView(ctx: Context) : View(ctx) {
             val best = prefs.getInt("best_${g.key}", 0)
             if (best > 0) { sub.textSize = h * 0.03f; c.drawText("Best: $best", r.left + 20f, r.bottom - 30f, sub) }
         }
-        val hands = handsOf(players, w, h)
-        val hit = if (now - menuAt > 1000L) dwellSelect(c, now, rects, hands) else -1
-        if (dwellIdx >= 0) selected = dwellIdx
+        val hands = raisedHands(players, w, h)
+        val hit = if (now - menuAt > 1000L) dwellSelect(c, now, rects, hitRects, hands) else -1
+        if (hoverIdx >= 0) selected = hoverIdx
         for (p in players) drawSkeleton(c, p, w, h)
         if (hit >= 0) { startGame(hit); return }
 
         sub.textSize = h * 0.032f
-        c.drawText("Players in view: ${players.size} (up to 4 - each gets a color)", w * 0.04f, h * 0.80f, sub)
-        for (p in players) { fill.color = PLAYER_COLORS[p.slot]; c.drawCircle(w * 0.04f + 30f + p.slot * 60f, h * 0.85f, 22f, fill) }
+        c.drawText("Players: ${players.size}", w * 0.04f, h * 0.74f, sub)
+        for (p in players) { fill.color = PLAYER_COLORS[p.slot]; c.drawCircle(w * 0.04f + 220f + p.slot * 50f, h * 0.74f - 10f, 18f, fill) }
         sub.textSize = h * 0.024f
-        var ty = h * 0.91f
-        for (l in info.split('\n')) { c.drawText(l, w * 0.04f, ty, sub); ty += sub.textSize * 1.2f }
+        val lines = info.split('\n')
+        var ty = h * 0.92f
+        val shown = if (debug) lines else listOfNotNull(lines.getOrNull(0), lines.getOrNull(2))
+        for (l in shown) { c.drawText(l, w * 0.04f, ty, sub); ty += sub.textSize * 1.2f }
         thumb?.let { if (now - thumbAt < 1500L) c.drawBitmap(it, null, RectF(w - 280f, 20f, w - 20f, 20f + 200f), null) }
     }
 
@@ -170,15 +186,12 @@ class GameView(ctx: Context) : View(ctx) {
         g.draw(c, w, h, players)
         for (p in players) drawSkeleton(c, p, w, h)
 
-        sub.textSize = h * 0.022f
-        c.drawText(info.split('\n').first(), 20f, h * 0.03f, sub)
-
         if (g.phase == 1) {
             if (g.roundMs > 0) {
                 val left = ((g.roundMs - (now - g.phaseStart)) / 1000L).toInt() + 1
                 center.textSize = h * 0.09f; c.drawText(left.toString(), w / 2, h * 0.11f, center)
             }
-            if (now - g.phaseStart < 6000L) { center.textSize = h * 0.04f; c.drawText(g.hint, w / 2, h * 0.19f, center) }
+            if (now - g.phaseStart < 2500L) { center.textSize = h * 0.05f; c.drawText(g.hint, w / 2, h * 0.20f, center) }
         }
         for (s in 0 until 4) if (g.joined[s]) {
             hud.color = PLAYER_COLORS[s]; hud.textSize = h * 0.05f
@@ -189,8 +202,7 @@ class GameView(ctx: Context) : View(ctx) {
             val num = 3 - ((now - g.phaseStart) / 1000L).toInt()
             if (num != lastCount) { lastCount = num; Sfx.tick() }
             center.textSize = h * 0.3f; c.drawText(num.coerceAtLeast(1).toString(), w / 2, h * 0.55f, center)
-            center.textSize = h * 0.05f; c.drawText(g.title + " - get ready!", w / 2, h * 0.25f, center)
-            center.textSize = h * 0.035f; c.drawText(g.hint, w / 2, h * 0.68f, center)
+            center.textSize = h * 0.06f; c.drawText(g.hint, w / 2, h * 0.22f, center)
         }
 
         if (g.phase == 2) {
@@ -204,11 +216,12 @@ class GameView(ctx: Context) : View(ctx) {
             fill.color = Color.argb(200, 0, 0, 0); c.drawRect(0f, 0f, w, h, fill)
             val ranked = (0 until 4).filter { g.joined[it] }.sortedByDescending { g.scores[it] }
             val head = when {
-                ranked.isEmpty() -> "No players detected"
+                ranked.isEmpty() -> "No players"
                 ranked.size >= 2 && g.scores[ranked[0]] == g.scores[ranked[1]] -> "Draw!"
                 ranked.size >= 2 -> "${PLAYER_NAMES[ranked[0]]} wins!"
                 else -> "Game over"
             }
+            center.color = Color.WHITE
             center.textSize = h * 0.11f; c.drawText(head, w / 2, h * 0.22f, center)
             if (newBest) { center.textSize = h * 0.05f; c.drawText("NEW BEST!", w / 2, h * 0.30f, center) }
             var y = h * 0.42f
@@ -218,17 +231,16 @@ class GameView(ctx: Context) : View(ctx) {
                 y += h * 0.09f
             }
             center.color = Color.WHITE
-            val rects = listOf(RectF(w * 0.22f, h * 0.78f, w * 0.48f, h * 0.90f), RectF(w * 0.52f, h * 0.78f, w * 0.78f, h * 0.90f))
+            val show = listOf(RectF(w * 0.18f, h * 0.76f, w * 0.48f, h * 0.88f), RectF(w * 0.52f, h * 0.76f, w * 0.82f, h * 0.88f))
+            val hit = listOf(RectF(w * 0.05f, h * 0.05f, w * 0.5f, h), RectF(w * 0.5f, h * 0.05f, w * 0.95f, h))
             val labels = listOf("Play again", "Menu")
-            for ((i, r) in rects.withIndex()) {
+            for ((i, r) in show.withIndex()) {
                 fill.color = Color.rgb(40, 55, 72); c.drawRoundRect(r, 20f, 20f, fill)
                 center.textSize = h * 0.05f; c.drawText(labels[i], r.centerX(), r.centerY() + h * 0.018f, center)
             }
-            val sel = if (now - g.phaseStart > 1500L) dwellSelect(c, now, rects, handsOf(players, w, h)) else -1
+            val sel = if (now - g.phaseStart > 2000L) dwellSelect(c, now, show, hit, raisedHands(players, w, h)) else -1
             for (p in players) drawSkeleton(c, p, w, h)
             if (sel == 0) startGame(games.indexOf(g)) else if (sel == 1) backToMenu()
-            sub.textSize = h * 0.026f
-            c.drawText("Hold a hand over a button, or press OK to play again / BACK for the menu", w * 0.5f - 560f, h * 0.95f, sub)
         }
     }
 }
