@@ -4,10 +4,13 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.RectF
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.SystemClock
+import android.content.SharedPreferences
+import kotlin.math.abs
 import kotlin.math.hypot
 
 val PLAYER_COLORS = intArrayOf(Color.rgb(255, 90, 90), Color.rgb(80, 160, 255), Color.rgb(90, 230, 120), Color.rgb(255, 210, 60))
@@ -42,6 +45,49 @@ object GameClock {
 fun pillRect(s: Int, w: Float, h: Float): RectF {
     val x = w * (0.03f + 0.25f * s)
     return RectF(x, h - h * 0.115f, x + w * 0.22f, h - h * 0.03f)
+}
+
+object Settings {
+    var lite = false
+    var sound = true
+    var debug = false
+    fun load(p: SharedPreferences) { lite = p.getBoolean("lite", false); sound = p.getBoolean("sound", true); debug = p.getBoolean("debug", false) }
+    fun save(p: SharedPreferences) { p.edit().putBoolean("lite", lite).putBoolean("sound", sound).putBoolean("debug", debug).apply() }
+}
+
+/**
+ * Body-relative pointer: the raised hand moves a cursor over `area`, wherever the player stands.
+ * Returns null while the hand is down (resting hands never point at anything).
+ */
+fun cursorOf(p: Player, area: RectF): PointF? {
+    if (p.n < 25) return null
+    val shY = (p.rawY(11) + p.rawY(12)) / 2f
+    val hipY = (p.rawY(23) + p.rawY(24)) / 2f
+    val torso = hipY - shY
+    val sw = abs(p.rawX(11) - p.rawX(12))
+    if (torso < 0.04f || sw < 0.02f) return null
+    val wi = if (p.rawY(15) < p.rawY(16)) 15 else 16
+    val wy = p.rawY(wi)
+    if (wy > hipY - 0.1f * torso) return null
+    val cx = (p.rawX(11) + p.rawX(12)) / 2f
+    val dx = (-(p.rawX(wi) - cx) / (sw * 1.6f)).coerceIn(-1f, 1f)
+    val dy = ((wy - (shY + 0.35f * torso)) / (torso * 1.15f)).coerceIn(-1f, 0.6f)
+    return PointF(area.centerX() + dx * area.width() / 2f, area.top + (dy + 1f) / 1.6f * area.height())
+}
+
+fun drawCenterText(c: Canvas, p: Paint, t: String, x: Float, y: Float, size: Float, col: Int) {
+    p.textSize = size; p.color = col; c.drawText(t, x, y, p)
+}
+
+/** Word-wrap centered text (paint must be center-aligned). Returns the next free y. */
+fun wrapCenter(c: Canvas, p: Paint, text: String, x: Float, y: Float, maxW: Float): Float {
+    var line = ""; var yy = y
+    for (word in text.split(" ")) {
+        val t = if (line.isEmpty()) word else "$line $word"
+        if (p.measureText(t) > maxW && line.isNotEmpty()) { c.drawText(line, x, yy, p); yy += p.textSize * 1.25f; line = word } else line = t
+    }
+    if (line.isNotEmpty()) { c.drawText(line, x, yy, p); yy += p.textSize * 1.25f }
+    return yy
 }
 
 private val heartPath = Path()
@@ -107,7 +153,7 @@ class Tracker {
 
 object Sfx {
     private val tg: ToneGenerator? = try { ToneGenerator(AudioManager.STREAM_MUSIC, 70) } catch (e: Throwable) { null }
-    private fun beep(t: Int, ms: Int) { try { tg?.startTone(t, ms) } catch (_: Throwable) {} }
+    private fun beep(t: Int, ms: Int) { if (!Settings.sound) return; try { tg?.startTone(t, ms) } catch (_: Throwable) {} }
     fun pop() = beep(ToneGenerator.TONE_PROP_BEEP, 60)
     fun hit() = beep(ToneGenerator.TONE_PROP_NACK, 150)
     fun tick() = beep(ToneGenerator.TONE_PROP_ACK, 80)
@@ -127,6 +173,8 @@ abstract class Game(val key: String, val title: String, val desc: String) {
     open val bgTop: Int = Color.rgb(12, 18, 40)
     open val bgBottom: Int = Color.rgb(40, 20, 70)
     abstract val hint: String
+    open val tag: String = "1-4 players"
+    open fun fmtBest(score: Int): String = score.toString()
 
     fun reset(now: Long, players: List<Player>) {
         scores.fill(0); joined.fill(false)

@@ -27,7 +27,7 @@ object Fx {
     fun clear() { ps.clear(); ts.clear(); shakeLeft = 0f }
 
     fun burst(x: Float, y: Float, color: Int, n: Int = 14, speed: Float = 0.5f, size: Float = 8f) {
-        repeat(n) {
+        repeat(if (Settings.lite) (n + 1) / 2 else n) {
             if (ps.size < 260) {
                 val a = Random.nextFloat() * 6.2832f
                 val sp = speed * (0.3f + 0.7f * Random.nextFloat())

@@ -77,7 +77,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         requestedOrientation = if (isTv) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         prefs.getString("crash", null)?.let { crashInfo = "Last crash: $it"; prefs.edit().remove("crash").apply() }
-        if (isTv) { game = GameView(this); setContentView(game) } else buildPhoneUi()
+        if (isTv) { game = GameView(this); game?.onToggleCamera = { useUvc = !useUvc; startSource() }; setContentView(game) } else buildPhoneUi()
         if (!hasCam()) requestPermissions(arrayOf(Manifest.permission.CAMERA), 1) else begin()
     }
 
@@ -172,10 +172,10 @@ class MainActivity : Activity() {
                 val now = SystemClock.elapsedRealtime()
                 val c = camFrames.get(); val p = pose?.poseFrames?.get() ?: 0
                 val camFps = c - lastCam; val poseFps = p - lastPose; lastCam = c; lastPose = p
-                val input = if (isTv) (if (remoteActive()) "Input: phone" else "Input: TV camera (${if (useUvc) "UVC" else "Camera2"}) - DOWN switches")
+                val input = if (isTv) (if (remoteActive()) "Input: phone" else "Input: TV camera (${if (useUvc) "UVC" else "Camera2"})")
                             else "PHONE camera -> TV"
                 val txt = "$input\nCam $camFps fps | Pose $poseFps fps | ${pose?.latencyMs?.toInt() ?: 0} ms | ${pose?.delegateName}\n$netStatus\n$camStatus $crashInfo"
-                overlay?.info = txt; game?.info = txt
+                overlay?.info = txt; game?.info = txt; game?.cameraLabel = if (useUvc) "UVC" else "Camera2"
                 overlay?.postInvalidate()
                 if (!isTv) {
                     val hide = netStatus.startsWith("Connected") && now - lastTouch > 6000
@@ -228,7 +228,6 @@ class MainActivity : Activity() {
     override fun onKeyDown(k: Int, e: KeyEvent): Boolean {
         if (isTv) {
             if (game?.onKey(k) == true) return true
-            if (k == KeyEvent.KEYCODE_DPAD_DOWN && game?.inMenu == true) { useUvc = !useUvc; startSource(); return true }
         }
         return super.onKeyDown(k, e)
     }
