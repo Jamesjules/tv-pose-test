@@ -11,8 +11,10 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.9" }
-      - name: Download pose model
-        run: curl -L -o app/src/main/assets/pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+      -       - name: Download pose model
+        run: |
+          mkdir -p app/src/main/assets
+          curl -L -o app/src/main/assets/pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
       - name: Build (Camera2 only)
         run: |
           gradle assembleDebug --no-daemon
