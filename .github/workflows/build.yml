@@ -1,0 +1,26 @@
+name: Build APKs
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Download pose model
+        run: curl -L -o app/src/main/assets/pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+      - name: Build (Camera2 only)
+        run: |
+          gradle assembleDebug --no-daemon
+          mkdir -p out && cp app/build/outputs/apk/debug/app-debug.apk out/pose-test-camera2.apk
+      - name: Build (with UVC / USB direct)
+        continue-on-error: true
+        run: |
+          gradle clean assembleDebug -PwithUvc=true --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk out/pose-test-uvc.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: apks, path: out/*.apk }
