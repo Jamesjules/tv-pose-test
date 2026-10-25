@@ -35,8 +35,8 @@ class GameView(ctx: Context) : View(ctx) {
     private val prefs = ctx.getSharedPreferences("posetest", 0)
     private val tracker = Tracker()
     private val games: List<Game> = listOf(
-        BubbleGame(), FruitGame(), DodgeGame(), FitnessGame(false), FitnessGame(true),
-        PuzzleGame(), MemoryGame(), MoleGame(), CatchGame(), QuizGame(), PoseGame())
+        BubbleGame(), FruitGame(), DodgeGame(), FitnessGame(true), BalloonGame(),
+        MemoryGame(), MoleGame(), CatchGame(), QuizGame(), PoseGame())
     private var selected = 0
     private var current: Game? = null
     private var inSettings = false
@@ -525,20 +525,20 @@ class GameView(ctx: Context) : View(ctx) {
         val ranked = (0 until 4).filter { g.joined[it] }.sortedByDescending { g.scores[it] }
         if (!savedResult) {
             savedResult = true
-            val best = ranked.maxOfOrNull { g.scores[it] } ?: 0
+            val best = g.bestValue()
             val key = "best_${g.key}"
             newBest = best > prefs.getInt(key, 0)
             if (newBest) prefs.edit().putInt(key, best).apply()
         }
         if (!confettiDone) { confettiDone = true; if (ranked.isNotEmpty() && g.scores[ranked[0]] > 0) Fx.confetti(w, h) }
         fill.color = withAlpha(Color.rgb(4, 6, 14), 215); c.drawRect(0f, 0f, w, h, fill)
-        val head = when {
+        val head = g.resultHeadline(ranked) ?: when {
             ranked.isEmpty() -> "No players"
             ranked.size >= 2 && g.scores[ranked[0]] == g.scores[ranked[1]] -> "Draw!"
             ranked.size >= 2 -> "${PLAYER_NAMES[ranked[0]]} wins!"
             else -> "Game over"
         }
-        val hc = if (ranked.size >= 2 && g.scores[ranked[0]] != g.scores[ranked[1]]) PLAYER_COLORS[ranked[0]] else Color.WHITE
+        val hc = if (g.resultHeadline(ranked) == null && ranked.size >= 2 && g.scores[ranked[0]] != g.scores[ranked[1]]) PLAYER_COLORS[ranked[0]] else Color.WHITE
         ctext(c, head, w / 2, h * 0.16f, h * 0.1f * (1f + 0.04f * sin(now / 250f)), hc)
         if (newBest) ctext(c, "NEW BEST!", w / 2, h * 0.23f, h * 0.045f, Color.rgb(255, 215, 90))
         val medals = intArrayOf(Color.rgb(255, 205, 60), Color.rgb(200, 205, 215), Color.rgb(205, 130, 70), Color.rgb(100, 110, 130))

@@ -20,6 +20,7 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 private val HANDS = intArrayOf(15, 16, 19, 20)
+private val quizDeck = ArrayList<Int>()
 private fun fillP() = Paint(Paint.ANTI_ALIAS_FLAG)
 private fun lineP() = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.WHITE }
 private fun textP() = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
@@ -34,189 +35,6 @@ private fun drawCursorDot(c: Canvas, p: Paint, pt: PointF, col: Int, h: Float) {
     p.style = Paint.Style.FILL
     p.color = withAlpha(col, 90); c.drawCircle(pt.x, pt.y, h * 0.035f, p)
     p.color = lighten(col, 0.5f); c.drawCircle(pt.x, pt.y, h * 0.015f, p)
-}
-
-// ======================= 6. Sliding Puzzle =======================
-class PuzzleGame : Game("puzzle", "Sliding Puzzle", "Slide the tiles to rebuild the picture. Race up to 4 players!") {
-    override val hint = "Raise a hand - hover a tile to slide it"
-    override val color = Color.rgb(120, 90, 220)
-    override val bgTop = Color.rgb(20, 16, 50)
-    override val bgBottom = Color.rgb(70, 40, 120)
-    override val roundMs = 300000L
-    override val joinLate = false
-    override fun fmtBest(score: Int): String = "${600 - score}s"
-
-    private val boards = Array(4) { IntArray(9) }
-    private val moves = IntArray(4)
-    private val solvedAt = LongArray(4)
-    private val hoverCell = IntArray(4) { -1 }
-    private val hoverStart = LongArray(4)
-    private val cur = arrayOfNulls<PointF>(4)
-    private val rects = Array(4) { RectF() }
-    private val slots = ArrayList<Int>()
-    private var pic: Bitmap? = null
-    private var startAt = 0L
-    private val paint = fillP()
-    private val stroke = lineP().apply { strokeWidth = 3f }
-    private val txt = textP()
-    private val ip = fillP()
-
-    private fun isSolved(b: IntArray): Boolean { for (i in 0 until 8) if (b[i] != i + 1) return false; return b[8] == 0 }
-
-    private fun makeShuffle(): IntArray {
-        while (true) {
-            val b = IntArray(9) { if (it < 8) it + 1 else 0 }
-            var e = 8; var lastE = -1
-            repeat(90) {
-                val opts = ArrayList<Int>()
-                val r = e / 3; val cc = e % 3
-                if (r > 0) opts.add(e - 3)
-                if (r < 2) opts.add(e + 3)
-                if (cc > 0) opts.add(e - 1)
-                if (cc < 2) opts.add(e + 1)
-                opts.remove(lastE)
-                val t = opts[Random.nextInt(opts.size)]
-                b[e] = b[t]; b[t] = 0; lastE = e; e = t
-            }
-            if (!isSolved(b)) return b
-        }
-    }
-
-    private fun makePic(): Bitmap {
-        val s = 360
-        val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
-        val cv = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG); val path = Path()
-        val f = s.toFloat()
-        p.shader = LinearGradient(0f, 0f, 0f, f * 0.75f, Color.rgb(30, 20, 95), Color.rgb(255, 140, 80), Shader.TileMode.CLAMP)
-        cv.drawRect(0f, 0f, f, f, p); p.shader = null
-        p.color = withAlpha(Color.WHITE, 200)
-        for (i in 0 until 16) cv.drawCircle(((i * 97) % s).toFloat(), ((i * 53) % (s / 3)).toFloat(), 2f + i % 3, p)
-        p.color = Color.rgb(240, 240, 255); cv.drawCircle(f * 0.18f, f * 0.16f, f * 0.07f, p)
-        p.color = Color.rgb(36, 22, 98); cv.drawCircle(f * 0.2f, f * 0.145f, f * 0.06f, p)
-        p.color = withAlpha(Color.rgb(255, 235, 160), 70); cv.drawCircle(f * 0.68f, f * 0.5f, f * 0.22f, p)
-        p.color = Color.rgb(255, 235, 160); cv.drawCircle(f * 0.68f, f * 0.5f, f * 0.14f, p)
-        p.color = Color.rgb(75, 42, 115)
-        path.moveTo(0f, f * 0.75f); path.lineTo(f * 0.2f, f * 0.48f); path.lineTo(f * 0.4f, f * 0.72f); path.lineTo(f * 0.6f, f * 0.54f)
-        path.lineTo(f * 0.85f, f * 0.75f); path.lineTo(f, f * 0.6f); path.lineTo(f, f); path.lineTo(0f, f); path.close(); cv.drawPath(path, p)
-        path.reset(); p.color = Color.rgb(30, 18, 60)
-        path.moveTo(0f, f * 0.86f); path.lineTo(f * 0.3f, f * 0.7f); path.lineTo(f * 0.55f, f * 0.86f); path.lineTo(f * 0.8f, f * 0.72f)
-        path.lineTo(f, f * 0.87f); path.lineTo(f, f); path.lineTo(0f, f); path.close(); cv.drawPath(path, p)
-        p.color = Color.rgb(90, 55, 40); cv.drawRect(f * 0.13f, f * 0.8f, f * 0.28f, f * 0.92f, p)
-        p.color = Color.rgb(210, 70, 60)
-        path.reset(); path.moveTo(f * 0.11f, f * 0.8f); path.lineTo(f * 0.205f, f * 0.7f); path.lineTo(f * 0.3f, f * 0.8f); path.close(); cv.drawPath(path, p)
-        p.color = Color.rgb(255, 220, 120); cv.drawRect(f * 0.18f, f * 0.84f, f * 0.23f, f * 0.9f, p)
-        p.color = withAlpha(Color.WHITE, 190); p.textAlign = Paint.Align.CENTER; p.typeface = Typeface.DEFAULT_BOLD; p.textSize = f * 0.12f
-        cv.drawText("RAZ", f * 0.62f, f * 0.96f, p)
-        return bmp
-    }
-
-    private fun layout(w: Float, h: Float) {
-        val n = max(1, slots.size)
-        val gap = w * 0.02f
-        val size = min((w * 0.92f - gap * (n - 1)) / n, h * 0.58f)
-        val total = n * size + gap * (n - 1)
-        val x0 = (w - total) / 2f; val y0 = h * 0.24f
-        for ((i, s) in slots.withIndex()) rects[s].set(x0 + i * (size + gap), y0, x0 + i * (size + gap) + size, y0 + size)
-    }
-
-    override fun onStart(now: Long) {
-        slots.clear(); for (i in 0 until 4) if (joined[i]) slots.add(i)
-        val sh = makeShuffle()
-        for (s in slots) { boards[s] = sh.copyOf(); moves[s] = 0; solvedAt[s] = 0L; hoverCell[s] = -1; cur[s] = null }
-        startAt = now
-        if (pic == null) pic = makePic()
-    }
-
-    private fun slide(b: IntArray, c: Int) {
-        val e = b.indexOf(0)
-        val er = e / 3; val ec = e % 3; val cr = c / 3; val cc = c % 3
-        if (er == cr) {
-            if (cc > ec) for (k in ec until cc) b[er * 3 + k] = b[er * 3 + k + 1]
-            else for (k in ec downTo cc + 1) b[er * 3 + k] = b[er * 3 + k - 1]
-        } else if (ec == cc) {
-            if (cr > er) for (k in er until cr) b[k * 3 + ec] = b[(k + 1) * 3 + ec]
-            else for (k in er downTo cr + 1) b[k * 3 + ec] = b[(k - 1) * 3 + ec]
-        }
-        b[c] = 0
-    }
-
-    override fun update(now: Long, dt: Long, players: List<Player>, w: Float, h: Float) {
-        if (slots.isEmpty()) return
-        layout(w, h)
-        for (s in slots) {
-            if (solvedAt[s] > 0L) continue
-            val r = rects[s]
-            val p = players.firstOrNull { it.slot == s }
-            cur[s] = smoothCursor(cur[s], if (p != null) cursorOf(p, r) else null)
-            val cu = cur[s]
-            if (cu == null) { hoverCell[s] = -1; continue }
-            val cs = r.width() / 3f
-            val col = ((cu.x - r.left) / cs).toInt().coerceIn(0, 2)
-            val row = ((cu.y - r.top) / cs).toInt().coerceIn(0, 2)
-            val cell = row * 3 + col
-            if (cell != hoverCell[s]) { hoverCell[s] = cell; hoverStart[s] = now }
-            val b = boards[s]
-            val e = b.indexOf(0)
-            val movable = cell != e && (cell / 3 == e / 3 || cell % 3 == e % 3)
-            if (movable && now - hoverStart[s] >= 500L) {
-                slide(b, cell); moves[s]++; Sfx.pop(); hoverStart[s] = now
-                Fx.burst(r.left + (col + 0.5f) * cs, r.top + (row + 0.5f) * cs, PLAYER_COLORS[s], 10, 0.35f, h * 0.007f)
-                if (isSolved(b)) {
-                    solvedAt[s] = now; scores[s] = max(1, 600 - ((now - startAt) / 1000L).toInt())
-                    Fx.burst(r.centerX(), r.centerY(), PLAYER_COLORS[s], 40, 0.7f, h * 0.012f)
-                    Fx.text(r.centerX(), r.top, "SOLVED!", PLAYER_COLORS[s], true)
-                    Sfx.over()
-                }
-            }
-        }
-        if (slots.all { solvedAt[it] > 0L }) finish()
-    }
-
-    override fun status(slot: Int): String =
-        if (!joined[slot]) "" else if (solvedAt[slot] > 0L) "DONE ${600 - scores[slot]}s" else "${moves[slot]} moves"
-
-    override fun draw(c: Canvas, w: Float, h: Float, players: List<Player>) {
-        val pc = pic ?: return
-        layout(w, h)
-        val now = GameClock.now()
-        val ps = pc.width / 3
-        for (s in slots) {
-            val r = rects[s]; val cs = r.width() / 3f
-            paint.color = withAlpha(PLAYER_COLORS[s], 60); c.drawRoundRect(RectF(r.left - 14f, r.top - 14f, r.right + 14f, r.bottom + 14f), 26f, 26f, paint)
-            paint.color = Color.argb(160, 6, 8, 20); c.drawRoundRect(r, 18f, 18f, paint)
-            val b = boards[s]
-            for (idx in 0 until 9) {
-                val v = b[idx]; if (v == 0) continue
-                val col = idx % 3; val row = idx / 3
-                val tr = RectF(r.left + col * cs + 3f, r.top + row * cs + 3f, r.left + (col + 1) * cs - 3f, r.top + (row + 1) * cs - 3f)
-                val hm = v - 1
-                c.drawBitmap(pc, Rect((hm % 3) * ps, (hm / 3) * ps, (hm % 3) * ps + ps, (hm / 3) * ps + ps), tr, null)
-                stroke.color = withAlpha(Color.WHITE, 140); stroke.strokeWidth = 3f; c.drawRect(tr, stroke)
-                if (solvedAt[s] == 0L) {
-                    paint.color = withAlpha(Color.BLACK, 140); c.drawCircle(tr.left + cs * 0.17f, tr.top + cs * 0.17f, cs * 0.12f, paint)
-                    drawCenterText(c, txt, v.toString(), tr.left + cs * 0.17f, tr.top + cs * 0.17f + cs * 0.055f, cs * 0.16f, Color.WHITE)
-                }
-                if (hoverCell[s] == idx && solvedAt[s] == 0L) {
-                    paint.color = withAlpha(Color.WHITE, 60); c.drawRect(tr, paint)
-                    val pr = ((now - hoverStart[s]) / 500f).coerceIn(0f, 1f)
-                    paint.color = PLAYER_COLORS[s]; c.drawRect(tr.left, tr.bottom - 10f, tr.left + tr.width() * pr, tr.bottom, paint)
-                }
-            }
-            val head = if (solvedAt[s] > 0L) "${PLAYER_NAMES[s]}  DONE ${600 - scores[s]}s" else "${PLAYER_NAMES[s]}  ${moves[s]} moves"
-            drawCenterText(c, txt, head, r.centerX(), r.top - h * 0.03f, h * 0.04f, PLAYER_COLORS[s])
-            cur[s]?.let { if (solvedAt[s] == 0L) drawCursorDot(c, paint, it, PLAYER_COLORS[s], h) }
-        }
-    }
-
-    override fun drawIcon(c: Canvas, cx: Float, cy: Float, s: Float) {
-        val cols = intArrayOf(Color.rgb(255, 120, 90), Color.rgb(255, 200, 70), Color.rgb(90, 200, 120), Color.rgb(90, 160, 255), Color.rgb(180, 110, 240), Color.rgb(255, 130, 190), Color.rgb(70, 210, 210), Color.rgb(250, 160, 60))
-        val t = s * 0.62f; var k = 0
-        for (i in 0 until 9) {
-            if (i == 8) continue
-            val x = cx + ((i % 3) - 1.5f) * t * 1.05f; val y = cy + ((i / 3) - 1.5f) * t * 1.05f
-            ip.color = cols[k++]; c.drawRoundRect(RectF(x, y, x + t, y + t), t * 0.2f, t * 0.2f, ip)
-        }
-    }
 }
 
 // ======================= 7. Memory Match =======================
@@ -547,40 +365,155 @@ class CatchGame : Game("catch", "Fruit Catch", "A basket rides on your head. Mov
 }
 
 // ======================= 10. Quiz Zones =======================
-class QuizGame : Game("quiz", "Quiz Zones", "Stand in the zone with the right answer. Think fast!") {
+class QuizGame : Game("quiz", "Quiz Zones", "Stand in the zone with the right answer. 130+ questions!") {
     override val hint = "Stand in the right zone"
+    override val tag = "1-4 players - 130+ questions"
     override val color = Color.rgb(60, 150, 230)
     override val bgTop = Color.rgb(8, 22, 56)
     override val bgBottom = Color.rgb(26, 72, 134)
     override val roundMs = 0L
     override val joinLate = false
 
-    private class Q(val q: String, val a: Array<String>, val c: Int)
+    private class Q(val cat: String, val q: String, val a: Array<String>, val c: Int)
+    private fun qz(cat: String, q: String, a: String, b: String, c: String, d: String, ans: Int) = Q(cat, q, arrayOf(a, b, c, d), ans)
     private val bank = listOf(
-        Q("7 x 8 = ?", arrayOf("54", "56", "58", "64"), 1),
-        Q("Which planet is called the Red Planet?", arrayOf("Venus", "Mars", "Jupiter", "Saturn"), 1),
-        Q("How many days are in a leap year?", arrayOf("364", "365", "366", "367"), 2),
-        Q("What is the capital of India?", arrayOf("Mumbai", "Kolkata", "New Delhi", "Chennai"), 2),
-        Q("Which gas do plants take in?", arrayOf("Oxygen", "Carbon dioxide", "Nitrogen", "Helium"), 1),
-        Q("How many sides does a hexagon have?", arrayOf("5", "6", "7", "8"), 1),
-        Q("Which is the largest ocean?", arrayOf("Atlantic", "Indian", "Arctic", "Pacific"), 3),
-        Q("What is India's national animal?", arrayOf("Lion", "Elephant", "Tiger", "Peacock"), 2),
-        Q("15 + 27 = ?", arrayOf("41", "42", "43", "52"), 1),
-        Q("Which is the fastest land animal?", arrayOf("Cheetah", "Horse", "Lion", "Leopard"), 0),
-        Q("How many continents are there?", arrayOf("5", "6", "7", "8"), 2),
-        Q("H2O is the formula for?", arrayOf("Salt", "Water", "Sugar", "Acid"), 1),
-        Q("Which planet is closest to the Sun?", arrayOf("Venus", "Earth", "Mercury", "Mars"), 2),
-        Q("100 / 4 = ?", arrayOf("20", "25", "30", "40"), 1),
-        Q("Which festival is the festival of lights?", arrayOf("Holi", "Diwali", "Eid", "Pongal"), 1),
-        Q("How many players are in a cricket team?", arrayOf("9", "10", "11", "12"), 2),
-        Q("Which organ pumps blood?", arrayOf("Brain", "Lungs", "Heart", "Liver"), 2),
-        Q("Blue mixed with yellow makes?", arrayOf("Green", "Purple", "Orange", "Brown"), 0),
-        Q("The Taj Mahal is in which city?", arrayOf("Delhi", "Agra", "Jaipur", "Lucknow"), 1),
-        Q("12 x 12 = ?", arrayOf("124", "132", "144", "154"), 2),
-        Q("Which is the largest mammal?", arrayOf("Elephant", "Blue whale", "Giraffe", "Hippo"), 1),
-        Q("How many minutes are in 2 hours?", arrayOf("100", "110", "120", "150"), 2),
-        Q("In which direction does the sun rise?", arrayOf("West", "North", "South", "East"), 3),
-        Q("What is the smallest prime number?", arrayOf("0", "1", "2", "3"), 2)
+        qz("Maths", "9 x 7 = ?", "56", "63", "72", "81", 1),
+        qz("Maths", "What is 144 / 12?", "10", "11", "12", "14", 2),
+        qz("Maths", "What is 25% of 200?", "25", "40", "50", "75", 2),
+        qz("Maths", "Which number is a prime number?", "21", "27", "29", "33", 2),
+        qz("Maths", "How many degrees are in a right angle?", "45", "90", "120", "180", 1),
+        qz("Maths", "15 x 15 = ?", "205", "215", "225", "235", 2),
+        qz("Maths", "What is the square root of 81?", "7", "8", "9", "10", 2),
+        qz("Maths", "How many sides does an octagon have?", "6", "7", "8", "9", 2),
+        qz("Maths", "1000 - 357 = ?", "633", "643", "653", "743", 1),
+        qz("Maths", "What comes next: 2, 4, 8, 16, ?", "20", "24", "30", "32", 3),
+        qz("Maths", "How many minutes are in 3 hours?", "120", "150", "180", "200", 2),
+        qz("Maths", "Which is the biggest number?", "0.9", "0.09", "0.99", "0.19", 2),
+        qz("Maths", "8 x 12 = ?", "86", "92", "96", "108", 2),
+        qz("Maths", "Half of 90 is?", "35", "40", "45", "55", 2),
+        qz("Maths", "How many sides does a triangle have?", "2", "3", "4", "5", 1),
+        qz("Maths", "7 x 8 = ?", "54", "56", "58", "64", 1),
+        qz("Maths", "15 + 27 = ?", "41", "42", "43", "52", 1),
+        qz("Maths", "100 / 4 = ?", "20", "25", "30", "40", 1),
+        qz("Maths", "12 x 12 = ?", "124", "132", "144", "154", 2),
+        qz("Maths", "What is the smallest prime number?", "0", "1", "2", "3", 2),
+        qz("Maths", "How many sides does a hexagon have?", "5", "6", "7", "8", 1),
+        qz("Maths", "How many minutes are in 2 hours?", "100", "110", "120", "150", 2),
+        qz("Maths", "How many days are in a leap year?", "364", "365", "366", "367", 2),
+        qz("Science", "Which planet is called the Red Planet?", "Venus", "Mars", "Jupiter", "Saturn", 1),
+        qz("Science", "Which gas do plants take in?", "Oxygen", "Carbon dioxide", "Nitrogen", "Helium", 1),
+        qz("Science", "H2O is the formula for?", "Salt", "Water", "Sugar", "Acid", 1),
+        qz("Science", "Which planet is closest to the Sun?", "Venus", "Earth", "Mercury", "Mars", 2),
+        qz("Science", "Blue mixed with yellow makes?", "Green", "Purple", "Orange", "Brown", 0),
+        qz("Science", "Which organ pumps blood around the body?", "Brain", "Lungs", "Heart", "Liver", 2),
+        qz("Science", "Which planet is the largest?", "Earth", "Jupiter", "Saturn", "Neptune", 1),
+        qz("Science", "What do bees make?", "Milk", "Honey", "Silk", "Sugar", 1),
+        qz("Science", "At sea level, water boils at?", "50 C", "80 C", "100 C", "150 C", 2),
+        qz("Science", "Which part of a plant makes its food?", "Root", "Stem", "Leaf", "Seed", 2),
+        qz("Science", "How many bones does an adult human have?", "106", "206", "306", "406", 1),
+        qz("Science", "What force pulls things towards the ground?", "Magnetism", "Gravity", "Friction", "Wind", 1),
+        qz("Science", "Which is the hardest natural substance?", "Gold", "Iron", "Diamond", "Quartz", 2),
+        qz("Science", "What is Earth's natural satellite?", "Sun", "Mars", "Moon", "Venus", 2),
+        qz("Science", "Which vitamin do we get from sunlight?", "A", "C", "D", "K", 2),
+        qz("Science", "Which gas makes party balloons float?", "Oxygen", "Helium", "Carbon dioxide", "Nitrogen", 1),
+        qz("Science", "Which blood cells carry oxygen?", "White cells", "Red cells", "Platelets", "Plasma", 1),
+        qz("Science", "What is the centre of an atom called?", "Electron", "Nucleus", "Orbit", "Cell", 1),
+        qz("Science", "Sunlight takes about how long to reach Earth?", "8 seconds", "8 minutes", "8 hours", "8 days", 1),
+        qz("Science", "Which planet is famous for its rings?", "Mars", "Saturn", "Mercury", "Venus", 1),
+        qz("Science", "What is the chemical symbol for gold?", "Go", "Gd", "Au", "Ag", 2),
+        qz("Science", "Which organ helps us breathe?", "Heart", "Liver", "Lungs", "Kidney", 2),
+        qz("Science", "What is frozen water called?", "Steam", "Ice", "Dew", "Fog", 1),
+        qz("Science", "Which one is a renewable energy source?", "Coal", "Solar power", "Petrol", "Diesel", 1),
+        qz("Science", "Which metal is liquid at room temperature?", "Iron", "Mercury", "Copper", "Tin", 1),
+        qz("Geography", "What is the capital of India?", "Mumbai", "Kolkata", "New Delhi", "Chennai", 2),
+        qz("Geography", "Which is the largest ocean?", "Atlantic", "Indian", "Arctic", "Pacific", 3),
+        qz("Geography", "How many continents are there?", "5", "6", "7", "8", 2),
+        qz("Geography", "In which direction does the sun rise?", "West", "North", "South", "East", 3),
+        qz("Geography", "The Taj Mahal is in which city?", "Delhi", "Agra", "Jaipur", "Lucknow", 1),
+        qz("Geography", "What is the capital of Japan?", "Seoul", "Beijing", "Tokyo", "Bangkok", 2),
+        qz("Geography", "Which river is holy and flows through Varanasi?", "Yamuna", "Ganga", "Godavari", "Krishna", 1),
+        qz("Geography", "What is the capital of France?", "Rome", "Madrid", "Paris", "Berlin", 2),
+        qz("Geography", "Which is the largest country by area?", "Canada", "China", "USA", "Russia", 3),
+        qz("Geography", "Mount Everest is part of which mountain range?", "Alps", "Andes", "Himalayas", "Rockies", 2),
+        qz("Geography", "Which desert is found in Rajasthan?", "Sahara", "Thar", "Gobi", "Kalahari", 1),
+        qz("Geography", "Which is the smallest continent?", "Europe", "Australia", "Antarctica", "South America", 1),
+        qz("Geography", "Which ocean lies south of India?", "Pacific", "Atlantic", "Indian", "Arctic", 2),
+        qz("Geography", "What is the capital of Australia?", "Sydney", "Melbourne", "Canberra", "Perth", 2),
+        qz("Geography", "In which country is the Eiffel Tower?", "Italy", "France", "Spain", "UK", 1),
+        qz("Geography", "Which state is the Land of Five Rivers?", "Haryana", "Punjab", "Gujarat", "Bihar", 1),
+        qz("Geography", "Which Indian city is called the Pink City?", "Jodhpur", "Jaipur", "Udaipur", "Agra", 1),
+        qz("Geography", "Which country has the pyramids of Giza?", "Egypt", "Iraq", "Peru", "Greece", 0),
+        qz("Geography", "Which is the largest Indian state by area?", "Maharashtra", "Rajasthan", "Uttar Pradesh", "Madhya Pradesh", 1),
+        qz("Geography", "The Great Wall is in which country?", "Japan", "India", "China", "Korea", 2),
+        qz("Geography", "How many states does India have?", "26", "28", "29", "30", 1),
+        qz("Geography", "What is the capital of Kerala?", "Kochi", "Thiruvananthapuram", "Kozhikode", "Thrissur", 1),
+        qz("Geography", "The Gateway of India is in which city?", "Delhi", "Mumbai", "Chennai", "Kolkata", 1),
+        qz("General", "What is India's national animal?", "Lion", "Elephant", "Tiger", "Peacock", 2),
+        qz("General", "Which festival is the festival of lights?", "Holi", "Diwali", "Eid", "Pongal", 1),
+        qz("General", "Who is called the Father of the Nation in India?", "Nehru", "Mahatma Gandhi", "Subhas Bose", "Sardar Patel", 1),
+        qz("General", "The Indian flag has how many main colours?", "2", "3", "4", "5", 1),
+        qz("General", "What is India's national bird?", "Sparrow", "Peacock", "Parrot", "Eagle", 1),
+        qz("General", "What is India's national fruit?", "Apple", "Banana", "Mango", "Guava", 2),
+        qz("General", "Which festival is celebrated with colours?", "Diwali", "Holi", "Onam", "Lohri", 1),
+        qz("General", "Who wrote India's national anthem?", "Rabindranath Tagore", "Bankim Chandra", "Muhammad Iqbal", "Premchand", 0),
+        qz("General", "What is India's currency?", "Dollar", "Rupee", "Yen", "Taka", 1),
+        qz("General", "How many colours are in a rainbow?", "5", "6", "7", "8", 2),
+        qz("General", "Which is India's national flower?", "Rose", "Lotus", "Marigold", "Jasmine", 1),
+        qz("General", "How many months have 31 days?", "5", "6", "7", "8", 2),
+        qz("General", "The Red Fort is in which city?", "Agra", "Delhi", "Jaipur", "Lahore", 1),
+        qz("General", "Republic Day is celebrated on?", "15 August", "26 January", "2 October", "14 November", 1),
+        qz("General", "Independence Day is celebrated on?", "26 January", "15 August", "2 October", "5 September", 1),
+        qz("General", "Which animal is called the ship of the desert?", "Horse", "Camel", "Donkey", "Elephant", 1),
+        qz("General", "Teachers' Day in India is on?", "14 November", "5 September", "2 October", "1 May", 1),
+        qz("General", "Who invented the telephone?", "Edison", "Alexander Graham Bell", "Newton", "Tesla", 1),
+        qz("Sports", "How many players are on a football team on the pitch?", "9", "10", "11", "12", 2),
+        qz("Sports", "Which sport uses a shuttlecock?", "Tennis", "Badminton", "Squash", "Golf", 1),
+        qz("Sports", "How many runs is a six in cricket?", "4", "5", "6", "8", 2),
+        qz("Sports", "Which country hosts the Wimbledon tennis tournament?", "USA", "France", "England", "Australia", 2),
+        qz("Sports", "How many rings are in the Olympic symbol?", "4", "5", "6", "7", 1),
+        qz("Sports", "Sachin Tendulkar is famous for which sport?", "Hockey", "Cricket", "Tennis", "Football", 1),
+        qz("Sports", "Neeraj Chopra won gold in which sport?", "Javelin throw", "Boxing", "Wrestling", "Archery", 0),
+        qz("Sports", "How many players are on court in a basketball team?", "5", "6", "7", "11", 0),
+        qz("Sports", "In chess, which piece moves in an L shape?", "Bishop", "Knight", "Rook", "Pawn", 1),
+        qz("Sports", "How many stumps are there in cricket?", "2", "3", "4", "5", 1),
+        qz("Sports", "The football World Cup is held every?", "2 years", "3 years", "4 years", "5 years", 2),
+        qz("Sports", "In which sport do you slam dunk?", "Volleyball", "Basketball", "Tennis", "Golf", 1),
+        qz("Sports", "How many players are on the mat for one kabaddi team?", "5", "7", "9", "11", 1),
+        qz("Sports", "How many players are in a cricket team?", "9", "10", "11", "12", 2),
+        qz("Animals", "Which is the fastest land animal?", "Cheetah", "Horse", "Lion", "Leopard", 0),
+        qz("Animals", "Which is the largest mammal?", "Elephant", "Blue whale", "Giraffe", "Hippo", 1),
+        qz("Animals", "Which animal is called the king of the jungle?", "Tiger", "Lion", "Elephant", "Bear", 1),
+        qz("Animals", "A baby kangaroo is called a?", "Pup", "Joey", "Cub", "Kit", 1),
+        qz("Animals", "Which of these birds cannot fly?", "Crow", "Ostrich", "Eagle", "Pigeon", 1),
+        qz("Animals", "How many hearts does an octopus have?", "1", "2", "3", "4", 2),
+        qz("Animals", "Which animal has the longest neck?", "Elephant", "Giraffe", "Camel", "Horse", 1),
+        qz("Animals", "What do giant pandas mainly eat?", "Fish", "Bamboo", "Meat", "Fruit", 1),
+        qz("Animals", "Which mammal can truly fly?", "Bat", "Flying squirrel", "Penguin", "Ostrich", 0),
+        qz("Animals", "A group of lions is called a?", "Pack", "Pride", "Herd", "Flock", 1),
+        qz("Animals", "Which animal can change its colour to hide?", "Chameleon", "Crocodile", "Tortoise", "Rabbit", 0),
+        qz("Animals", "Which is the largest bird?", "Eagle", "Ostrich", "Penguin", "Albatross", 1),
+        qz("Animals", "Which animal gives us wool?", "Cow", "Sheep", "Dog", "Horse", 1),
+        qz("Animals", "How many legs does an insect have?", "4", "6", "8", "10", 1),
+        qz("Animals", "How many legs does a spider have?", "6", "8", "10", "12", 1),
+        qz("Animals", "Which sea animal has eight arms?", "Octopus", "Jellyfish", "Shark", "Dolphin", 0),
+        qz("Tech", "What does WWW stand for?", "World Wide Web", "Wide World Web", "Web World Wide", "World Web Wide", 0),
+        qz("Tech", "Which company makes the Android system?", "Apple", "Google", "Microsoft", "Sony", 1),
+        qz("Tech", "What does CPU stand for?", "Central Processing Unit", "Computer Power Unit", "Central Program Unit", "Control Panel Unit", 0),
+        qz("Tech", "Which of these is a search engine?", "Google", "Excel", "Paint", "Notepad", 0),
+        qz("Tech", "How many bits are in a byte?", "4", "8", "16", "32", 1),
+        qz("Tech", "Which key deletes the letter to the left of the cursor?", "Enter", "Backspace", "Shift", "Tab", 1),
+        qz("Tech", "What does USB stand for?", "Universal Serial Bus", "United System Box", "Universal Server Base", "Unique Serial Block", 0),
+        qz("Tech", "Which language builds the structure of web pages?", "HTML", "Python", "C", "Java", 0),
+        qz("History", "Who was the first Prime Minister of India?", "Gandhi", "Jawaharlal Nehru", "Sardar Patel", "Lal Bahadur Shastri", 1),
+        qz("History", "In which year did India become independent?", "1942", "1947", "1950", "1952", 1),
+        qz("History", "Who is famous for discovering gravity?", "Einstein", "Newton", "Galileo", "Edison", 1),
+        qz("History", "Who painted the Mona Lisa?", "Picasso", "Leonardo da Vinci", "Van Gogh", "Michelangelo", 1),
+        qz("History", "Which emperor built the Taj Mahal?", "Akbar", "Shah Jahan", "Babur", "Aurangzeb", 1),
+        qz("History", "Which ancient people built the pyramids of Giza?", "Romans", "Egyptians", "Greeks", "Mayans", 1),
+        qz("History", "Who was the first man on the Moon?", "Yuri Gagarin", "Neil Armstrong", "Buzz Aldrin", "Rakesh Sharma", 1),
+        qz("History", "Who was the first Indian in space?", "Kalpana Chawla", "Rakesh Sharma", "Sunita Williams", "Vikram Sarabhai", 1),
+        qz("History", "Who is called the Missile Man of India?", "Homi Bhabha", "A. P. J. Abdul Kalam", "C. V. Raman", "Vikram Sarabhai", 1),
+        qz("History", "Who chaired the drafting committee of India's Constitution?", "Nehru", "Dr. B. R. Ambedkar", "Gandhi", "Sardar Patel", 1)
     )
     private var picks = ArrayList<Q>()
     private var qi = 0
@@ -593,7 +526,9 @@ class QuizGame : Game("quiz", "Quiz Zones", "Stand in the zone with the right an
     private val txt = textP().apply { setShadowLayer(6f, 2f, 2f, Color.BLACK) }
 
     override fun onStart(now: Long) {
-        picks = ArrayList(bank.shuffled().take(8)); qi = 0; qStart = now; reveal = false; zoneOf.fill(-1)
+        if (quizDeck.size < 10) { quizDeck.clear(); quizDeck.addAll((0 until bank.size).shuffled()) }
+        picks = ArrayList<Q>(); repeat(10) { picks.add(bank[quizDeck.removeAt(0)]) }
+        qi = 0; qStart = now; reveal = false; zoneOf.fill(-1)
     }
 
     override fun update(now: Long, dt: Long, players: List<Player>, w: Float, h: Float) {
@@ -620,7 +555,7 @@ class QuizGame : Game("quiz", "Quiz Zones", "Stand in the zone with the right an
         val q = picks[qi]
         val card = RectF(w * 0.1f, h * 0.1f, w * 0.9f, h * 0.27f)
         paint.color = withAlpha(Color.rgb(6, 12, 30), 190); c.drawRoundRect(card, 30f, 30f, paint)
-        drawCenterText(c, txt, "Question ${qi + 1} / ${picks.size}", w * 0.5f, h * 0.075f, h * 0.03f, Color.rgb(170, 190, 225))
+        drawCenterText(c, txt, "Question ${qi + 1} / ${picks.size}  -  ${q.cat}", w * 0.5f, h * 0.075f, h * 0.03f, Color.rgb(170, 190, 225))
         txt.textSize = h * 0.055f; txt.color = Color.WHITE
         wrapCenter(c, txt, q.q, w / 2, card.top + h * 0.075f, card.width() - 60f)
         if (!reveal) {
@@ -777,5 +712,125 @@ class PoseGame : Game("pose", "Pose Match", "Copy the pose shown on screen befor
         c.drawLine(cx, cy - s * 0.5f, cx, cy + s * 0.15f, line)
         c.drawLine(cx - s * 0.8f, cy - s * 0.35f, cx + s * 0.8f, cy - s * 0.35f, line)
         c.drawLine(cx, cy + s * 0.15f, cx - s * 0.4f, cy + s * 0.8f, line); c.drawLine(cx, cy + s * 0.15f, cx + s * 0.4f, cy + s * 0.8f, line)
+    }
+}
+
+// ======================= Balloon Keep-Up (team game) =======================
+class BalloonGame : Game("balloon", "Balloon Keep-Up", "Keep the balloons in the air with your hands and head. Work as a team!") {
+    override val hint = "Keep the balloon in the air!"
+    override val tag = "1-4 players - teamwork"
+    override val color = Color.rgb(250, 90, 140)
+    override val bgTop = Color.rgb(36, 96, 170)
+    override val bgBottom = Color.rgb(150, 210, 240)
+    override val roundMs = 0L
+    override fun status(slot: Int): String = if (joined[slot]) "${scores[slot]} hits" else ""
+    override fun bestValue(): Int = total
+    override fun resultHeadline(ranked: List<Int>): String? = "Team: $total hits!"
+
+    private class Bl(var x: Float, var y: Float, var vx: Float, var vy: Float, val color: Int, var hitAt: Long)
+    private val balloons = ArrayList<Bl>()
+    private var lives = 3
+    private var total = 0
+    private val hitIdx = intArrayOf(0, 15, 16, 19, 20, 13, 14)
+    private val cols = intArrayOf(Color.rgb(240, 70, 90), Color.rgb(255, 205, 50), Color.rgb(160, 90, 230))
+    private val paint = fillP()
+    private val line = lineP().apply { strokeWidth = 3f }
+    private val txt = textP()
+    private val path = Path()
+
+    override fun onReset(now: Long) { balloons.clear(); lives = 3; total = 0 }
+
+    private fun spawn(w: Float, h: Float, now: Long) {
+        balloons.add(Bl(w * (0.25f + 0.5f * Random.nextFloat()), h * 0.2f, (Random.nextFloat() - 0.5f) * 0.1f, 0f, cols[balloons.size % 3], now))
+    }
+
+    override fun update(now: Long, dt: Long, players: List<Player>, w: Float, h: Float) {
+        if (balloons.isEmpty()) spawn(w, h, now)
+        if (total >= 15 && balloons.size < 2) spawn(w, h, now)
+        if (total >= 40 && balloons.size < 3) spawn(w, h, now)
+        val r = min(w, h) * 0.07f
+        val g = h * 0.0000011f * (1f + total / 90f)
+        val d = dt.toFloat()
+        val ground = h * 0.9f
+        for (b in balloons) {
+            b.vy = min(b.vy + g * d, h * 0.0011f)
+            b.vx *= max(0f, 1f - 0.0006f * d)
+            b.x += b.vx * d; b.y += b.vy * d
+            if (b.x < r) { b.x = r; b.vx = abs(b.vx) * 0.8f } else if (b.x > w - r) { b.x = w - r; b.vx = -abs(b.vx) * 0.8f }
+            if (b.y < r) { b.y = r; b.vy = abs(b.vy) * 0.5f }
+
+            outer@ for (p in players) for (i in hitIdx) {
+                if (i >= p.n) continue
+                val px = p.x(i, w); val py = p.y(i, h)
+                val dx = b.x - px; val dy = b.y - py
+                val dist = hypot(dx, dy)
+                if (dist < r * 1.15f + 14f && now - b.hitAt > 130L) {
+                    var nx = dx / max(1f, dist); var ny = dy / max(1f, dist) - 0.7f
+                    val len = max(0.001f, hypot(nx, ny)); nx /= len; ny /= len
+                    val sp = h * 0.00085f
+                    b.vx = nx * sp * 0.9f + b.vx * 0.15f; b.vy = ny * sp
+                    b.hitAt = now; scores[p.slot]++; total++; Sfx.pop()
+                    Fx.burst(px, py, PLAYER_COLORS[p.slot], 8, 0.35f, h * 0.007f)
+                    if (total % 10 == 0) Fx.text(b.x, b.y - r * 1.5f, "$total!", Color.rgb(255, 235, 120), true)
+                    break@outer
+                }
+            }
+
+            if (b.y + r * 1.1f > ground) {
+                lives--; Sfx.hit(); Fx.shake(300f, h * 0.012f)
+                Fx.burst(b.x, ground, b.color, 24, 0.55f, h * 0.01f)
+                Fx.text(b.x, ground - r, "Oops!", Color.rgb(255, 90, 90), true)
+                b.x = w * (0.3f + 0.4f * Random.nextFloat()); b.y = h * 0.15f; b.vx = 0f; b.vy = 0f; b.hitAt = now
+                if (lives <= 0) { finish(); return }
+            }
+        }
+    }
+
+    override fun draw(c: Canvas, w: Float, h: Float, players: List<Player>) {
+        val now = GameClock.now()
+        val r = min(w, h) * 0.07f
+        val ground = h * 0.9f
+        // clouds
+        paint.color = withAlpha(Color.WHITE, 90)
+        for (k in 0 until 3) {
+            val cx = ((k * 0.37f + now * 0.000004f * (1 + k)) % 1.3f - 0.15f) * w
+            val cy = h * (0.18f + 0.17f * k)
+            c.drawOval(RectF(cx - w * 0.07f, cy - h * 0.03f, cx + w * 0.07f, cy + h * 0.03f), paint)
+            c.drawOval(RectF(cx - w * 0.04f, cy - h * 0.06f, cx + w * 0.04f, cy + h * 0.01f), paint)
+        }
+        // ground
+        paint.color = withAlpha(Color.rgb(40, 140, 70), 190); c.drawRect(0f, ground, w, h, paint)
+        paint.color = withAlpha(Color.rgb(120, 220, 140), 200); c.drawRect(0f, ground, w, ground + 6f, paint)
+        // team counter
+        drawCenterText(c, txt, "$total", w / 2, h * 0.26f, h * 0.2f, withAlpha(Color.WHITE, 70))
+        drawCenterText(c, txt, "TEAM HITS", w / 2, h * 0.07f, h * 0.03f, withAlpha(Color.WHITE, 200))
+        paint.color = Color.rgb(255, 70, 90)
+        for (i in 0 until 3) {
+            paint.color = if (i < lives) Color.rgb(255, 70, 90) else withAlpha(Color.WHITE, 90)
+            drawHeart(c, w * 0.05f + i * h * 0.06f, h * 0.07f, h * 0.022f, paint)
+        }
+        for (b in balloons) {
+            val sq = max(0f, 1f - (now - b.hitAt) / 160f)
+            val rx = r * 0.9f * (1f + 0.18f * sq); val ry = r * 1.1f * (1f - 0.12f * sq)
+            // shadow on the ground
+            val hh = ((ground - b.y) / h).coerceIn(0f, 1f)
+            paint.color = withAlpha(Color.BLACK, (60 * (1f - hh)).toInt()); c.drawOval(RectF(b.x - r * 0.8f, ground - 6f, b.x + r * 0.8f, ground + 10f), paint)
+            // string
+            path.reset(); path.moveTo(b.x, b.y + ry); path.quadTo(b.x - r * 0.3f, b.y + ry + r * 0.6f, b.x, b.y + ry + r * 1.2f); path.quadTo(b.x + r * 0.3f, b.y + ry + r * 1.8f, b.x - r * 0.05f, b.y + ry + r * 2.4f)
+            line.color = withAlpha(Color.WHITE, 200); c.drawPath(path, line)
+            // knot + body
+            paint.color = darken(b.color, 0.25f)
+            path.reset(); path.moveTo(b.x, b.y + ry - 2f); path.lineTo(b.x - r * 0.12f, b.y + ry + r * 0.14f); path.lineTo(b.x + r * 0.12f, b.y + ry + r * 0.14f); path.close(); c.drawPath(path, paint)
+            paint.color = withAlpha(b.color, 255); c.drawOval(RectF(b.x - rx, b.y - ry, b.x + rx, b.y + ry), paint)
+            paint.color = withAlpha(lighten(b.color, 0.5f), 120); c.drawOval(RectF(b.x - rx * 0.75f, b.y - ry * 0.8f, b.x + rx * 0.2f, b.y + ry * 0.1f), paint)
+            paint.color = withAlpha(Color.WHITE, 220); c.drawOval(RectF(b.x - rx * 0.55f, b.y - ry * 0.65f, b.x - rx * 0.25f, b.y - ry * 0.3f), paint)
+        }
+    }
+
+    override fun drawIcon(c: Canvas, cx: Float, cy: Float, s: Float) {
+        line.color = withAlpha(Color.WHITE, 220); line.strokeWidth = s * 0.05f
+        path.reset(); path.moveTo(cx, cy + s * 0.55f); path.quadTo(cx - s * 0.2f, cy + s * 0.75f, cx, cy + s * 0.9f); path.quadTo(cx + s * 0.2f, cy + s * 1.05f, cx - s * 0.03f, cy + s * 1.2f); c.drawPath(path, line)
+        paint.color = Color.rgb(240, 70, 90); c.drawOval(RectF(cx - s * 0.5f, cy - s * 0.75f, cx + s * 0.5f, cy + s * 0.58f), paint)
+        paint.color = withAlpha(Color.WHITE, 200); c.drawOval(RectF(cx - s * 0.3f, cy - s * 0.55f, cx - s * 0.12f, cy - s * 0.25f), paint)
     }
 }

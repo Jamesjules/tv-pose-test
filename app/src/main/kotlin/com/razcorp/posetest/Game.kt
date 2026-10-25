@@ -175,6 +175,8 @@ abstract class Game(val key: String, val title: String, val desc: String) {
     abstract val hint: String
     open val tag: String = "1-4 players"
     open fun fmtBest(score: Int): String = score.toString()
+    open fun bestValue(): Int = (0 until 4).filter { joined[it] }.maxOfOrNull { scores[it] } ?: 0
+    open fun resultHeadline(ranked: List<Int>): String? = null
 
     fun reset(now: Long, players: List<Player>) {
         scores.fill(0); joined.fill(false)
