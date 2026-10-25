@@ -60,12 +60,16 @@ class PhoneLink(private val onStatus: (String) -> Unit) {
         out = null; closer = null
     }
 
-    fun send(p: FloatArray?) {
+    fun send(poses: List<FloatArray>) {
         val o = out ?: return
-        val n = (p?.size ?: 0) / 2
-        val bb = ByteBuffer.allocate(10 + n * 4)
-        bb.put(0x52.toByte()); bb.putLong(SystemClock.elapsedRealtime()); bb.put(n.toByte())
-        if (p != null) for (v in p) bb.putShort((v * 10000f).toInt().coerceIn(-32767, 32767).toShort())
+        var size = 10
+        for (p in poses) size += 1 + p.size * 2
+        val bb = ByteBuffer.allocate(size)
+        bb.put(0x53.toByte()); bb.putLong(SystemClock.elapsedRealtime()); bb.put(poses.size.toByte())
+        for (p in poses) {
+            bb.put((p.size / 2).toByte())
+            for (v in p) bb.putShort((v * 10000f).toInt().coerceIn(-32767, 32767).toShort())
+        }
         try { synchronized(this) { o.write(bb.array()); o.flush() } }
         catch (e: Exception) { drop(); onStatus("Link lost - reconnecting...") }
     }

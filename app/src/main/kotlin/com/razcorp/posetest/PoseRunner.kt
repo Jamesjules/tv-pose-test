@@ -12,7 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class PoseRunner(
     ctx: Context,
-    private val onPose: (FloatArray?) -> Unit,
+    private val numPoses: Int,
+    private val onPose: (List<FloatArray>) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
     private var lm: PoseLandmarker? = null
@@ -35,17 +36,17 @@ class PoseRunner(
         val opts = PoseLandmarker.PoseLandmarkerOptions.builder()
             .setBaseOptions(base)
             .setRunningMode(RunningMode.LIVE_STREAM)
-            .setNumPoses(1)
+            .setNumPoses(numPoses)
             .setResultListener { result, _ ->
                 val now = SystemClock.elapsedRealtime()
                 latencyMs = latencyMs * 0.8f + (now - submitAt) * 0.2f
                 poseFrames.incrementAndGet()
-                val pts = result.landmarks().firstOrNull()
-                if (pts == null) onPose(null) else {
+                val list = result.landmarks().map { pts ->
                     val arr = FloatArray(pts.size * 2)
                     pts.forEachIndexed { i, p -> arr[i * 2] = p.x(); arr[i * 2 + 1] = p.y() }
-                    onPose(arr)
+                    arr
                 }
+                onPose(list)
                 busy = false
             }
             .setErrorListener { e -> onStatus("Pose error: ${e.message}"); busy = false }
@@ -60,7 +61,7 @@ class PoseRunner(
 
     fun submit(bmp: Bitmap) {
         val l = lm ?: return
-        if (busy) return            // drop frames while the model is busy
+        if (busy) return
         busy = true
         submitAt = SystemClock.elapsedRealtime()
         var ts = SystemClock.uptimeMillis()

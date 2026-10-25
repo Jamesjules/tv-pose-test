@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
 /** TV side: listens for a phone over Wi-Fi (TCP, auto-discoverable) and Bluetooth (RFCOMM). */
 class TvServer(
     private val ctx: Context,
-    private val onPose: (FloatArray?) -> Unit,
+    private val onPose: (List<FloatArray>) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
     companion object {
@@ -89,10 +89,21 @@ class TvServer(
         try {
             val d = DataInputStream(BufferedInputStream(ins))
             while (running) {
-                if (d.readByte().toInt() != 0x52) break
-                d.readLong()
-                val n = d.readUnsignedByte()
-                if (n == 0) onPose(null) else onPose(FloatArray(n * 2) { d.readShort() / 10000f })
+                val magic = d.readByte().toInt()
+                if (magic == 0x52) {            // v1: one person
+                    d.readLong()
+                    val n = d.readUnsignedByte()
+                    onPose(if (n == 0) emptyList() else listOf(FloatArray(n * 2) { d.readShort() / 10000f }))
+                } else if (magic == 0x53) {     // v2: up to 4 people
+                    d.readLong()
+                    val cnt = d.readUnsignedByte()
+                    val list = ArrayList<FloatArray>()
+                    repeat(cnt) {
+                        val n = d.readUnsignedByte()
+                        list.add(FloatArray(n * 2) { d.readShort() / 10000f })
+                    }
+                    onPose(list)
+                } else break
             }
         } catch (_: Exception) {}
         onStatus(waiting())

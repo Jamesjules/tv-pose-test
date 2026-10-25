@@ -108,7 +108,7 @@ class MainActivity : Activity() {
     private fun begin() {
         if (started) return
         started = true
-        pose = PoseRunner(this, ::onLocalPose) { camStatus = it }
+        pose = PoseRunner(this, if (isTv) 2 else 4, ::onLocalPose) { camStatus = it }
         if (isTv) {
             server = TvServer(this, ::onRemotePose) { netStatus = it }.also { it.start() }
         } else {
@@ -121,7 +121,7 @@ class MainActivity : Activity() {
             override fun run() {
                 val c = camFrames.get(); val p = pose?.poseFrames?.get() ?: 0
                 val camFps = c - lastCam; val poseFps = p - lastPose; lastCam = c; lastPose = p
-                val input = if (isTv) (if (remoteActive()) "PHONE" else "TV camera (${if (useUvc) "UVC" else "Camera2"}) [OK = switch]") else "this phone's camera -> TV"
+                val input = if (isTv) (if (remoteActive()) "PHONE" else "TV camera (${if (useUvc) "UVC" else "Camera2"}) [DOWN = switch cam]") else "this phone's camera -> TV"
                 val txt = "${if (isTv) "TV" else "PHONE"} mode | input: $input\n" +
                     "Cam $camFps fps | Pose $poseFps fps | ${pose?.latencyMs?.toInt() ?: 0} ms | ${pose?.delegateName}\n$netStatus\n$camStatus"
                 overlay?.info = txt; game?.info = txt
@@ -131,14 +131,14 @@ class MainActivity : Activity() {
         })
     }
 
-    private fun onLocalPose(pts: FloatArray?) {
-        if (isTv) { if (!remoteActive()) game?.setPose(pts) }
-        else { overlay?.setPose(pts); link?.send(pts) }
+    private fun onLocalPose(pts: List<FloatArray>) {
+        if (isTv) { if (!remoteActive()) game?.setFrame(pts) }
+        else { overlay?.setPoses(pts); link?.send(pts) }
     }
 
-    private fun onRemotePose(pts: FloatArray?) {
+    private fun onRemotePose(pts: List<FloatArray>) {
         remoteTs = SystemClock.elapsedRealtime()
-        game?.setPose(pts)
+        game?.setFrame(pts)
     }
 
     private fun startSource() {
@@ -159,10 +159,18 @@ class MainActivity : Activity() {
     }
 
     override fun onKeyDown(k: Int, e: KeyEvent): Boolean {
-        if (isTv && (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER)) {
-            useUvc = !useUvc; camFrames.set(0); lastCam = 0; startSource(); return true
+        if (isTv) {
+            if (game?.onKey(k) == true) return true
+            if (k == KeyEvent.KEYCODE_DPAD_DOWN && game?.inMenu == true) {
+                useUvc = !useUvc; camFrames.set(0); lastCam = 0; startSource(); return true
+            }
         }
         return super.onKeyDown(k, e)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (isTv && game?.inGame() == true) game?.backToMenu() else super.onBackPressed()
     }
 
     override fun onDestroy() {
